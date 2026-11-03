@@ -1,0 +1,29 @@
+# Pinned versions of upstream software used by this repository.
+# Scripts read the "commit" and "url" lines of each entry under "upstream".
+# status: candidate = built and tested on the development host, not yet confirmed for production.
+schema_version: 1
+upstream:
+  nestdaq:
+    url: https://github.com/spadi-alliance/nestdaq
+    commit: eda728718362cc0ee169bea9b111ffc3fda7ca6b
+    status: candidate
+  nestdaq-user-impl:
+    url: https://github.com/spadi-alliance/nestdaq-user-impl
+    commit: dc2985f70b8ad38303cf403dc7acae0e523ce593
+    status: candidate
+  uhbook:
+    url: https://github.com/spadi-alliance/uhbook
+    commit: e979eb28fb64de2eb216ebec31f73a6696d257ec
+    status: candidate
+  hul-common-lib:
+    url: https://github.com/spadi-alliance/hul-common-lib.git
+    commit: 65476509aa401aad10148ec7c2d2a50ba7d2db3e
+    status: candidate
+  amaneq-soft:
+    url: https://github.com/spadi-alliance/amaneq-soft.git
+    commit: 86fef97ccc4e6488739e2d8b549a1c5bddd3542e
+    status: candidate
+submodules:
+  online-analyzer:
+    url: https://github.com/f-oura/NestdaqAnalyzer.git
+    note: pinned by the submodule commit
