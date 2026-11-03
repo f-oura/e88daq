@@ -1,0 +1,58 @@
+# Board setup for one DAQ configuration.
+# Copy to config/local/setup.yaml (ignored by Git) and replace every placeholder.
+# Placeholder addresses use the documentation ranges (192.0.2.0/24, 02:00:00:...); never commit real values.
+schema_version: 1
+
+# MIKUMARI root: distributes the clock and the heartbeat frame (HBF) state. Not a data source.
+timing_root:
+  serial: ROOT-SERIAL
+  endpoint: 192.0.2.16
+
+# Data sources read by NestDAQ (AmQStrTdcSampler, SiTCP TCP port 24).
+data_sources:
+  receiver:                # AMANEQ B2TT trigger receiver
+    serial: RECEIVER-SERIAL
+    endpoint: 192.0.2.18
+    fem_id: 0xc0000212     # FEM ID written in the STF header (derived from the board IP)
+    tdc_type_label: 3
+  hrtdc:                   # AMANEQ Str-HRTDC
+    serial: HRTDC-SERIAL
+    endpoint: 192.0.2.30
+    fem_id: 0xc000021e
+    tdc_type_label: 2
+
+# Board checks done by run-control/daqctl.py before any run.
+operational_control:
+  boards:
+    root:
+      role: root
+      mac: 02:00:00:00:00:10
+      identity_address: 0xe0100000   # firmware version register
+      identity_value: 0xf1000209     # expected firmware version
+      link_mask: 3
+      tdc_type: null
+      interface: daq0                # host network interface towards the boards
+      source: 192.0.2.1              # host address on that interface
+    receiver:
+      role: receiver
+      mac: 02:00:00:00:00:12
+      identity_address: 0x31600000
+      identity_value: 0x00020003
+      link_mask: 1
+      tdc_type: 3
+      interface: daq0
+      source: 192.0.2.1
+    hrtdc:
+      role: hrtdc
+      mac: 02:00:00:00:00:30
+      identity_address: 0xe0100000
+      identity_value: 0xc480020a
+      link_mask: 4
+      tdc_type: 2
+      interface: daq0
+      source: 192.0.2.1
+
+# TimeFrameBuilder output.
+shared_timeframe_topology:
+  storage:
+    directory: /path/to/data   # must exist; files are runXXXXXX.dat, never overwritten
