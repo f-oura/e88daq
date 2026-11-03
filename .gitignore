@@ -1,0 +1,20 @@
+# Host-specific configuration
+/config/local/
+*.env
+!*.env.example
+*.pem
+*.key
+
+# Build products and data
+build/
+install/
+*.dat
+*.root
+__pycache__/
+*.py[cod]
+
+# Editors
+.vscode/
+.idea/
+*~
+*.swp
