@@ -1,0 +1,3 @@
+[submodule "online-analyzer"]
+	path = online-analyzer
+	url = https://github.com/f-oura/NestdaqAnalyzer.git
