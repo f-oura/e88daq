@@ -9,6 +9,8 @@ timing_root:
   endpoint: 192.0.2.16
 
 # Data sources read by NestDAQ (AmQStrTdcSampler, SiTCP TCP port 24).
+# One sampler/STFBuilder pair per entry, all into one TimeFrameBuilder. Add one entry per board
+# (for example hrtdc1, hrtdc2, ...) and a board entry of the same name under operational_control.
 data_sources:
   receiver:                # AMANEQ B2TT trigger receiver
     serial: RECEIVER-SERIAL

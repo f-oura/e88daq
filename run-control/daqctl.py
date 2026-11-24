@@ -50,7 +50,9 @@ def inspect(board, reader, events):
         raise RuntimeError('firmware identity mismatch for ' + ip)
     row = {'endpoint': ip, 'serial': board['serial'], 'identity': identity}
     row['links'] = [read(reader, ip, address, 4, events) for address in [0, 0x00500000, 0x00600000]]
-    row['linked'] = all(v & board['link_mask'] == board['link_mask'] for v in row['links'])
+    mask = board.get('link_mask')
+    # An unknown mask is reported, never assumed: the board counts as not linked.
+    row['linked'] = mask is not None and all(v & mask == mask for v in row['links'])
     if board['role'] == 'hrtdc':
         row['control'] = read(reader, ip, 0x20300000, 1, events)
         row['ddr_status'] = read(reader, ip, 0x20400000, 1, events)
@@ -94,7 +96,7 @@ def main(argv=None):
     ap.add_argument('--seconds', type=float, default=10)
     ap.add_argument('--run-number', type=int, help='required for default timeframe run; explicit E88 number')
     ap.add_argument('--data-dir', help='TF data directory; default from setup manifest')
-    ap.add_argument('--builder', choices=['timeframe','separate-stf'], default='timeframe', help='run output topology (default: two-source TimeFrameBuilder)')
+    ap.add_argument('--builder', choices=['timeframe','separate-stf'], default='timeframe', help='run output topology (default: TimeFrameBuilder over every data source)')
     args = ap.parse_args(argv)
     out = pathlib.Path(args.out).resolve()
     out.mkdir(parents=True, exist_ok=False)
@@ -140,8 +142,9 @@ def main(argv=None):
             raise RuntimeError('not all boards READY; prepare required')
         if args.action == 'run':
             if args.builder == 'timeframe':
-                if set(manifest['data_sources']) != {'receiver','hrtdc'}:
-                    raise RuntimeError('timeframe topology requires exactly Receiver and HR-TDC')
+                unchecked = set(manifest['data_sources']) - set(boards)
+                if unchecked:
+                    raise RuntimeError('data sources without a board check: ' + ', '.join(sorted(unchecked)))
                 cmd = [sys.executable, str(ROOT/'nestdaq/scripts/run-timeframe-chain.py'), str(out/'timeframe'), '--live', '--seconds', str(args.seconds), '--manifest', str(pathlib.Path(args.manifest).resolve()), '--set-hbfstate', args.set_hbfstate, '--run-number',str(args.run_number),'--data-dir',str(data_file.parent)]
             else:
                 cmd = [sys.executable, str(ROOT/'nestdaq/scripts/run-separate-stf.py'), '--root', root['endpoint'], '--set-hbfstate', args.set_hbfstate, '--on', str(args.seconds), '--summary', str(out/'capture.json')]

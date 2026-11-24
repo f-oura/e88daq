@@ -55,5 +55,6 @@ Copy a template from `config/*.example` to `config/local/` (ignored by Git) and 
 
 ## Status
 
-Under construction. The two-source chain (B2TT receiver and one Str-HRTDC board, one shared TimeFrameBuilder) has been tested by replaying saved data; live operation with these scripts is not tested yet.
-More HR-TDC boards, the HUL tools, run lists, and the online analyzer and filter outputs are being added.
+Under construction. The TimeFrameBuilder chain takes any number of data sources from the setup file. It has been tested by replaying saved data
+(the B2TT receiver and one Str-HRTDC board, and an eight-source chain); live operation with these scripts is not tested yet.
+The HUL tools, run lists, and the online analyzer and filter outputs are being added.

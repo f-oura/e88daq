@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
-"""Two STF sources -> NestDAQ TimeFrameBuilder -> FileSink.
+"""N STF sources -> NestDAQ TimeFrameBuilder -> FileSink.
 
---live opens the SiTCP endpoints listed in the setup file (config/local/setup.yaml).
+Every entry of data_sources in the setup file (config/local/setup.yaml) becomes one
+AmQStrTdcSampler -> STFBuilder pair; --sources selects a subset in the given order.
+--live opens the SiTCP endpoints listed in the setup file.
 Optional --set-hbfstate switches the root HBF on for the capture and off afterwards;
 no reset or firmware action. --replay sends saved STF multipart messages instead of
 reading boards. All child processes and the Redis instance belong to this invocation.
@@ -14,9 +16,27 @@ sys.path.insert(0,str(ROOT/'nestdaq/lib'))
 from run_storage import output_path
 
 
-def wait_sampler_tcp(procs, output, timeout=10):
-    """RUNNING is logged before PreRun connects TCP; wait for both connections."""
-    keys = ('ReceiverInput', 'HrtdcInput')
+def service_base(name):
+    """Setup key (e.g. 'hrtdc30') -> NestDAQ service stem (e.g. 'Hrtdc30')."""
+    parts=[x for x in re.split(r'[^A-Za-z0-9]+',name) if x]
+    if not parts:raise ValueError(f'unusable data source name: {name!r}')
+    return ''.join(x[0].upper()+x[1:] for x in parts)
+
+
+def select_sources(setup, names=None):
+    """Ordered {STF service: setup key}; names=None keeps the setup order."""
+    available=list(setup['data_sources'])
+    chosen=available if not names else names
+    unknown=[n for n in chosen if n not in available]
+    if unknown:raise ValueError(f'unknown data sources: {unknown}')
+    if len(set(chosen))!=len(chosen) or not chosen:raise ValueError('data sources must be non-empty and distinct')
+    roles={service_base(n)+'STF':n for n in chosen}
+    if len(roles)!=len(chosen):raise ValueError('data source names collide after normalisation')
+    return roles
+
+
+def wait_sampler_tcp(procs, output, keys, timeout=10):
+    """RUNNING is logged before PreRun connects TCP; wait for every connection."""
     deadline = time.monotonic() + timeout
     while True:
         ready = True
@@ -44,16 +64,18 @@ def main():
     p.add_argument('--set-hbfstate',type=Path,help='set_hbfstate executable; switches the root HBF on and off around the capture (only with --live; the caller checks it is off before)')
     p.add_argument('--prefix',type=Path,default=os.environ.get('NESTDDAQ_PREFIX'))
     mode=p.add_mutually_exclusive_group(required=True)
-    mode.add_argument('--replay',nargs=2,metavar=('RECEIVER_MESSAGES','HRTDC_MESSAGES'))
+    mode.add_argument('--replay',nargs='+',metavar='MESSAGES',help='one saved STF message file per selected source, in source order')
     mode.add_argument('--live',action='store_true',help='read the boards listed in the setup file')
     p.add_argument('--sender',type=Path)
+    p.add_argument('--sources',nargs='+',metavar='NAME',help='data_sources keys to use, in order (default: all, in setup order)')
     a=p.parse_args()
     if not a.prefix or a.seconds<=0 or not math.isfinite(a.seconds) or a.output.exists():p.error('prefix required, seconds positive, output must be new')
     a.output=a.output.resolve();a.prefix=a.prefix.resolve()
     setup=yaml.safe_load(a.manifest.read_text())
     if a.set_hbfstate and not a.live:p.error('HBF gate is allowed only in explicit live mode')
-    if a.replay and (not a.sender or not a.sender.is_file() or any(not Path(f).is_file() for f in a.replay)):p.error('replay requires two input files and a sender executable')
-    roles={'ReceiverSTF':'receiver','HrtdcSTF':'hrtdc'}
+    try:roles=select_sources(setup,a.sources)
+    except ValueError as exc:p.error(str(exc))
+    if a.replay and (len(a.replay)!=len(roles) or not a.sender or not a.sender.is_file() or any(not Path(f).is_file() for f in a.replay)):p.error('replay requires one input file per selected source and a sender executable')
     for role in roles.values():
         b=setup['data_sources'][role]
         if not b['endpoint'] or b['endpoint']=='UNBOUND':p.error('unbound endpoint')
@@ -98,8 +120,9 @@ def main():
     with socket.socket() as sock:sock.bind(('127.0.0.1',0));port=sock.getsockname()[1]
     redisconf=a.output/'redis.conf'
     redisconf.write_text(f'bind 127.0.0.1\nport {port}\nprotected-mode yes\nsave ""\nappendonly no\ndir {a.output}\n')
-    tag=str(os.getpid());devices=['FileSink','TimeFrameBuilder','ReceiverSTF','HrtdcSTF']
-    if not a.replay:devices+=['ReceiverInput','HrtdcInput']
+    tag=str(os.getpid());inputs=[svc.replace('STF','Input') for svc in roles]
+    devices=['FileSink','TimeFrameBuilder',*roles]
+    if not a.replay:devices+=inputs
     try:
         module=a.prefix/'lib64/redis/modules/redistimeseries.so'
         if not module.is_file():raise RuntimeError('RedisTimeSeries module required by TimeFrameBuilder metrics')
@@ -114,7 +137,7 @@ def main():
         else:raise RuntimeError('Redis not ready')
         r('TS.ADD','tfb-readiness','*',0)
         r('SET','run_info:run_number',a.run_number)
-        # One pull socket with two distinct STF peers; no source cross-talk.
+        # One pull socket with one distinct peer per STF source; no source cross-talk.
         endpoints=[('FileSink','in','pull','connect'),('TimeFrameBuilder','out','push','bind'),('TimeFrameBuilder','in','pull','bind')]
         links=[('TimeFrameBuilder','out','FileSink','in')]
         for service in roles:
@@ -144,11 +167,11 @@ def main():
         time.sleep(2)
         for cmd,target in [('INIT DEVICE','INITIALIZED'),('BIND','BOUND'),('CONNECT','DEVICE READY'),('INIT TASK','READY')]:drive(cmd,target)
         tftext=(a.output/'TimeFrameBuilder.log').read_text(errors='replace')
-        if not re.search(r'number of source = 2\b',tftext):raise RuntimeError('TimeFrameBuilder did not bind exactly two input peers')
+        if not re.search(rf'number of source = {len(roles)}\b',tftext):raise RuntimeError(f'TimeFrameBuilder did not bind exactly {len(roles)} input peers')
         drive('RUN','RUNNING',keys=['FileSink','TimeFrameBuilder'] if a.replay else devices)
         if not a.replay:
-            wait_sampler_tcp(procs, a.output)
-        print('RUNNING: two STF peers -> TimeFrameBuilder -> FileSink',flush=True)
+            wait_sampler_tcp(procs, a.output, inputs)
+        print(f'RUNNING: {len(roles)} STF peers -> TimeFrameBuilder -> FileSink',flush=True)
         if a.set_hbfstate:
             hbf_attempted=True;hbf('on')
         deadline=time.monotonic()+a.seconds

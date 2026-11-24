@@ -28,11 +28,13 @@ nestdaq/scripts/build-devices.sh                        # devices in nestdaq/dev
 
 Normally these are started by `run-control/daqctl.py`, not by hand.
 
-- `scripts/run-timeframe-chain.py` — the default chain. One `AmQStrTdcSampler` → `STFBuilder` per data source
-  (Receiver and HR-TDC), both into one `TimeFrameBuilder` → `FileSink`. Each STF holds one heartbeat frame,
+- `scripts/run-timeframe-chain.py` — the default chain. One `AmQStrTdcSampler` → `STFBuilder` per entry of `data_sources`
+  in the setup file (for example the Receiver and several HR-TDC boards), all into one `TimeFrameBuilder` → `FileSink`. Each STF holds one heartbeat frame,
   so the TimeFrameBuilder joins the sources by heartbeat-frame number. Output: `runXXXXXX.dat` in the storage directory.
   - `--live` reads the boards in the setup file; `--set-hbfstate` switches the root HBF on for the capture and off afterwards.
-  - `--replay RECEIVER_MESSAGES HRTDC_MESSAGES --sender build/devices/StfPartSender` feeds saved STFs instead of boards
+  - `--sources NAME ...` uses only the named `data_sources` entries, in that order (default: all, in setup order).
+    Service names follow the entry names: `hrtdc2` becomes `Hrtdc2Input` → `Hrtdc2STF`.
+  - `--replay FILE ... --sender build/devices/StfPartSender` feeds saved STFs instead of boards, one file per selected source
     (prepare the inputs with `tools/replay_timeframe_inputs.py`).
   - Every invocation starts its own Redis on 127.0.0.1 (with the RedisTimeSeries module that TimeFrameBuilder needs for metrics)
     and stops only the processes it started.

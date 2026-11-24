@@ -70,4 +70,27 @@ class RunStoragePreflightTests(unittest.TestCase):
             self.assertEqual(rc,2);inspect.assert_not_called()
             self.assertEqual(pathlib.Path(d,'run000042.dat').read_bytes(),b'keep')
 
+class MultiSourceTests(unittest.TestCase):
+    def manifest(self, d, with_board=True):
+        import yaml
+        data = yaml.safe_load(pathlib.Path(SETUP[1]).read_text())
+        data['data_sources']['hrtdc2'] = dict(data['data_sources']['hrtdc'], endpoint='192.0.2.31')
+        if with_board:
+            data['operational_control']['boards']['hrtdc2'] = dict(data['operational_control']['boards']['hrtdc'])
+        path = pathlib.Path(d, 'setup.yaml'); path.write_text(yaml.safe_dump(data)); return str(path)
+    def run_with(self, with_board):
+        with tempfile.TemporaryDirectory() as d, patch.object(m,'inspect',return_value={'linked':True,'ready':True}), patch.object(m,'read',return_value=0), patch.object(m,'capture_with_receiver_output') as capture:
+            rc=m.main(['--manifest',self.manifest(d,with_board),'run','--reader','/r','--writer','/w','--set-hbfstate','/h','--run-number','42','--data-dir',d,'--out',d+'/run'])
+            return rc,capture
+    def test_three_sources_start_timeframe_chain(self):
+        rc,capture=self.run_with(True)
+        self.assertEqual(rc,0);capture.assert_called_once()
+    def test_source_without_board_check_never_starts(self):
+        rc,capture=self.run_with(False)
+        self.assertEqual(rc,2);capture.assert_not_called()
+    def test_unknown_link_mask_is_not_linked(self):
+        board={'endpoint':'ip','serial':'s','interface':'d','source':'src','mac':'aa','identity_address':0,'identity_value':1,'link_mask':None,'role':'root'}
+        with patch.object(m,'invoke',side_effect=['dev d src src','ip lladdr aa REACHABLE']), patch.object(m,'read',side_effect=[1,7,7,7]):
+            self.assertFalse(m.inspect(board,'r',[])['linked'])
+
 if __name__=='__main__':unittest.main()

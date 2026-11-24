@@ -17,6 +17,8 @@ run-control/daqctl.py run     --reader "$READER" --writer "$WRITER" --set-hbfsta
 ```
 
 - The setup file is `config/local/setup.yaml` (template: `config/setup.yaml.example`); pass another one with `--manifest`.
+  Every entry of `data_sources` needs a board entry of the same name under `operational_control.boards`, and exactly one board has the role `receiver`.
+  A board whose `link_mask` is `null` is reported but never counts as linked, so `status` shows its link registers and `prepare`/`run` stop.
 - `status` checks for every board: the host route and MAC, the firmware identity, the links, and for HR-TDC the receiver enable and DDR alignment.
   It also checks that the root HBF is off.
 - `prepare` runs `initialize` only on HR-TDC boards that are not ready, and checks the success messages and the state afterwards.
