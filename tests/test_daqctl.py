@@ -93,4 +93,16 @@ class MultiSourceTests(unittest.TestCase):
         with patch.object(m,'invoke',side_effect=['dev d src src','ip lladdr aa REACHABLE']), patch.object(m,'read',side_effect=[1,7,7,7]):
             self.assertFalse(m.inspect(board,'r',[])['linked'])
 
+class WebctlTests(unittest.TestCase):
+    def test_webctl_passed_to_timeframe_chain(self):
+        with tempfile.TemporaryDirectory() as d, patch.object(m,'inspect',return_value={'linked':True,'ready':True}), patch.object(m,'read',return_value=0), patch.object(m,'capture_with_receiver_output') as capture:
+            rc=m.main(SETUP+['run','--reader','/r','--writer','/w','--set-hbfstate','/h','--run-number','42','--data-dir',d,'--out',d+'/run','--webctl','127.0.0.1:8080'])
+            self.assertEqual(rc,0)
+            cmd=capture.call_args.args[4]
+            self.assertEqual(cmd[cmd.index('--webctl')+1],'127.0.0.1:8080')
+    def test_webctl_rejected_outside_timeframe_run(self):
+        with tempfile.TemporaryDirectory() as d, patch.object(m,'inspect') as inspect:
+            rc=m.main(SETUP+['status','--reader','/r','--out',d+'/s','--webctl','127.0.0.1:8080'])
+            self.assertEqual(rc,2);inspect.assert_not_called()
+
 if __name__=='__main__':unittest.main()

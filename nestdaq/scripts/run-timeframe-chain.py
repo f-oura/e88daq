@@ -7,8 +7,13 @@ AmQStrTdcSampler -> STFBuilder pair; --sources selects a subset in the given ord
 Optional --set-hbfstate switches the root HBF on for the capture and off afterwards;
 no reset or firmware action. --replay sends saved STF multipart messages instead of
 reading boards. All child processes and the Redis instance belong to this invocation.
+--webctl ADDR:PORT starts daq-webctl there instead of driving the devices: the state
+transitions and RUN/STOP are taken from the browser, the root HBF is switched on after
+RUN (once every sampler has connected) and off before STOP by nestdaq/scripts/webctl-hook.py,
+and the session ends when every device has exited (END in the browser) or on SIGINT/SIGTERM.
+The HBF is switched off again whenever the session ends.
 """
-import argparse,json,math,os,re,socket,subprocess,time,sys
+import argparse,json,math,os,re,shlex,signal,socket,subprocess,time,sys
 from pathlib import Path
 import yaml
 ROOT=Path(__file__).resolve().parents[2]
@@ -68,6 +73,7 @@ def main():
     mode.add_argument('--live',action='store_true',help='read the boards listed in the setup file')
     p.add_argument('--sender',type=Path)
     p.add_argument('--sources',nargs='+',metavar='NAME',help='data_sources keys to use, in order (default: all, in setup order)')
+    p.add_argument('--webctl',metavar='ADDR:PORT',help='hand control to daq-webctl listening here (for example 127.0.0.1:8080); --seconds is ignored')
     a=p.parse_args()
     if not a.prefix or a.seconds<=0 or not math.isfinite(a.seconds) or a.output.exists():p.error('prefix required, seconds positive, output must be new')
     a.output=a.output.resolve();a.prefix=a.prefix.resolve()
@@ -88,7 +94,7 @@ def main():
     data_file=output_path(data_dir,a.run_number)
     a.output.mkdir(parents=True,exist_ok=bool(a.replay and not a.data_dir))
     env=dict(os.environ);env['LD_LIBRARY_PATH']=f'{a.prefix}/lib64:{a.prefix}/lib:'+env.get('LD_LIBRARY_PATH','')
-    procs={};logs={};hbf_attempted=False;hbf_off_attempted=False;report={'mode':'replay' if a.replay else 'live','hardware_control':'Root HBF gate' if a.set_hbfstate else 'none','setup_manifest':str(a.manifest),'hbf_events':[],'run_number':a.run_number,'data_file':str(data_file),'sources':{},'states':{},'commands':{}}
+    procs={};logs={};hbf_attempted=False;hbf_off_attempted=False;report={'mode':('replay' if a.replay else 'live')+('+webctl' if a.webctl else ''),'hardware_control':'Root HBF gate' if a.set_hbfstate else 'none','setup_manifest':str(a.manifest),'hbf_events':[],'run_number':a.run_number,'data_file':str(data_file),'sources':{},'states':{},'commands':{}}
     def launch(key,command):
         logs[key]=open(a.output/f'{key}.log','w')
         procs[key]=subprocess.Popen([str(x) for x in command],stdout=logs[key],stderr=subprocess.STDOUT,env=env,cwd=ROOT)
@@ -165,6 +171,13 @@ def main():
                 for group in [source,f'{source}-{tag}']:r('HSET','parameters:'+group,'msiTcpIp',b['endpoint'],'TdcType',b['tdc_type_label'],db=2)
                 launch(source,command(source,a.prefix/'bin/AmQStrTdcSampler',['--out-chan-name','out']))
         time.sleep(2)
+        if a.webctl:
+            def keep_presence():
+                # Devices started with --id do not publish their presence key; webctl lists instances and
+                # connecting devices find their peers through it, so the launcher keeps it alive.
+                for svc in devices:r('SETEX',f'daq_service:{svc}:{svc}-{tag}:presence',120,'owned-launcher-placeholder')
+            run_webctl(a,launch,procs,logs,env,devices,inputs,setup,port,report,keep_presence)
+            return
         for cmd,target in [('INIT DEVICE','INITIALIZED'),('BIND','BOUND'),('CONNECT','DEVICE READY'),('INIT TASK','READY')]:drive(cmd,target)
         tftext=(a.output/'TimeFrameBuilder.log').read_text(errors='replace')
         if not re.search(rf'number of source = {len(roles)}\b',tftext):raise RuntimeError(f'TimeFrameBuilder did not bind exactly {len(roles)} input peers')
@@ -194,7 +207,11 @@ def main():
         report['status']='FAILED';report['error']=str(exc);raise
     finally:
         # Always try to switch HBF off after any on attempt, even a failed one.
-        if hbf_attempted and not hbf_off_attempted:
+        # In webctl mode the hook may have switched it on at any RUN: switch it off unconditionally.
+        if a.webctl and a.set_hbfstate:
+            try:hbf('off')
+            except Exception as exc:report['hbf_restore_error']=str(exc)
+        elif hbf_attempted and not hbf_off_attempted:
             try:hbf_off_attempted=True;hbf('off')
             except Exception as exc:report['hbf_restore_error']=str(exc)
         # Only Popen objects created by this process; no process-name signalling.
@@ -206,4 +223,41 @@ def main():
         for log in logs.values():log.close()
         report['final_exit_codes']={k:p.returncode for k,p in procs.items()}
         (a.output/'report.json').write_text(json.dumps(report,indent=2)+'\n')
+def run_webctl(a,launch,procs,logs,env,devices,inputs,setup,port,report,keep_presence):
+    """Start daq-webctl with the HBF hooks and wait until the devices end or a signal arrives."""
+    hook=[sys.executable,str(ROOT/'nestdaq/scripts/webctl-hook.py')]
+    opts=['--output',str(a.output),'--inputs',*([] if a.replay else inputs)]
+    if a.set_hbfstate:opts+=['--set-hbfstate',str(a.set_hbfstate.resolve()),'--root',setup['timing_root']['endpoint']]
+    hooks={f'--{e}':shlex.join(hook+[e]+opts) for e in ['pre-run','post-run','pre-stop','post-stop']}
+    command=[a.prefix/'bin/daq-webctl','--http-uri',f'http://{a.webctl}','--redis-uri',f'tcp://127.0.0.1:{port}/0']
+    for k,v in hooks.items():command+=[k,v]
+    launch('webctl',command)
+    # daq-webctl terminates when a browser drops its WebSocket abruptly (unhandled "Broken pipe").
+    # It keeps no state of its own (the devices and Redis do), so it is restarted, a bounded number of times.
+    restarts=[]
+    def stop(signum,frame):raise KeyboardInterrupt(f'signal {signum}')
+    signal.signal(signal.SIGTERM,stop)
+    print(f'WEBCTL: http://{a.webctl}/daq-webctl.html  ({len(inputs)} sources; END in the browser or Ctrl-C ends the session)',flush=True)
+    try:
+        last=0
+        while any(procs[k].poll() is None for k in devices):
+            if procs['webctl'].poll() is not None:
+                restarts.append({'time':time.time(),'returncode':procs['webctl'].returncode})
+                report['webctl_restarts']=restarts
+                if len(restarts)>20:raise RuntimeError('daq-webctl exited too often')
+                logs['webctl'].close()
+                logs['webctl']=open(a.output/'webctl.log','a')
+                procs['webctl']=subprocess.Popen([str(x) for x in command],stdout=logs['webctl'],stderr=subprocess.STDOUT,env=env,cwd=ROOT)
+                print(f'WEBCTL: restarted after exit code {restarts[-1]["returncode"]}',flush=True)
+            if time.monotonic()-last>30:keep_presence();last=time.monotonic()
+            time.sleep(.5)
+        report['status']='WEBCTL_SESSION_ENDED'
+    except KeyboardInterrupt as exc:
+        report['status']='WEBCTL_SESSION_INTERRUPTED';report['interrupt']=str(exc)
+    report['exit_codes']={k:procs[k].returncode for k in devices}
+    hooks_file=a.output/'hooks.jsonl'
+    report['hooks']=[json.loads(x) for x in hooks_file.read_text().splitlines()] if hooks_file.exists() else []
+    if any(h.get('status')!='OK' for h in report['hooks']):report['hook_failures']=True
+
+
 if __name__=='__main__':main()

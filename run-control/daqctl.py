@@ -96,6 +96,7 @@ def main(argv=None):
     ap.add_argument('--seconds', type=float, default=10)
     ap.add_argument('--run-number', type=int, help='required for default timeframe run; explicit E88 number')
     ap.add_argument('--data-dir', help='TF data directory; default from setup manifest')
+    ap.add_argument('--webctl', metavar='ADDR:PORT', help='timeframe run controlled from daq-webctl at this address instead of a fixed --seconds capture')
     ap.add_argument('--builder', choices=['timeframe','separate-stf'], default='timeframe', help='run output topology (default: TimeFrameBuilder over every data source)')
     args = ap.parse_args(argv)
     out = pathlib.Path(args.out).resolve()
@@ -123,6 +124,8 @@ def main(argv=None):
             result.update(run_number=args.run_number,data_file=str(data_file))
         elif args.action == 'run' and (args.run_number is not None or args.data_dir is not None):
             raise ValueError('run-number/data-dir options apply to timeframe mode only')
+        if args.webctl and (args.action != 'run' or args.builder != 'timeframe'):
+            raise ValueError('--webctl applies to the timeframe run only')
         for name, board in boards.items():
             result['boards'][name] = inspect(board, args.reader, events)
         root = next(b for b in boards.values() if b['role'] == 'root')
@@ -146,6 +149,8 @@ def main(argv=None):
                 if unchecked:
                     raise RuntimeError('data sources without a board check: ' + ', '.join(sorted(unchecked)))
                 cmd = [sys.executable, str(ROOT/'nestdaq/scripts/run-timeframe-chain.py'), str(out/'timeframe'), '--live', '--seconds', str(args.seconds), '--manifest', str(pathlib.Path(args.manifest).resolve()), '--set-hbfstate', args.set_hbfstate, '--run-number',str(args.run_number),'--data-dir',str(data_file.parent)]
+                if args.webctl:
+                    cmd += ['--webctl', args.webctl]
             else:
                 cmd = [sys.executable, str(ROOT/'nestdaq/scripts/run-separate-stf.py'), '--root', root['endpoint'], '--set-hbfstate', args.set_hbfstate, '--on', str(args.seconds), '--summary', str(out/'capture.json')]
                 for name, board in boards.items():

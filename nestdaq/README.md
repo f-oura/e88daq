@@ -36,6 +36,14 @@ Normally these are started by `run-control/daqctl.py`, not by hand.
     Service names follow the entry names: `hrtdc2` becomes `Hrtdc2Input` → `Hrtdc2STF`.
   - `--replay FILE ... --sender build/devices/StfPartSender` feeds saved STFs instead of boards, one file per selected source
     (prepare the inputs with `tools/replay_timeframe_inputs.py`).
+  - `--webctl ADDR:PORT` starts `daq-webctl` (the NestDAQ web controller) at that address and leaves the state transitions,
+    RUN, STOP, the run number, and END to the browser (`http://ADDR:PORT/daq-webctl.html`). `scripts/webctl-hook.py` runs around
+    RUN and STOP: after RUN it waits until every sampler has connected and then switches the root HBF on; before STOP it switches it off.
+    The session ends when every device has exited (END) or on Ctrl-C/SIGTERM, and the HBF is switched off then as well.
+    Hook results are in `hooks.jsonl` in the output directory. Bind to 127.0.0.1 and reach it through an SSH tunnel
+    or the password-protected portal proxy (`../web/deploy-daq-webctl.sh`).
+    `daq-webctl` aborts when a browser drops its WebSocket abruptly; it keeps no state of its own, so the launcher restarts it
+    (recorded as `webctl_restarts` in `report.json`) and the devices and the run continue.
   - Every invocation starts its own Redis on 127.0.0.1 (with the RedisTimeSeries module that TimeFrameBuilder needs for metrics)
     and stops only the processes it started.
 - `scripts/run-board-chain.sh` — one board: `AmQStrTdcSampler` → `STFBuilder` → `FileSink`.

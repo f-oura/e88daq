@@ -26,6 +26,9 @@ run-control/daqctl.py run     --reader "$READER" --writer "$WRITER" --set-hbfsta
 - `run` requires every board ready and the root HBF off. It enables the Receiver record output (and restores it afterwards),
   starts `nestdaq/scripts/run-timeframe-chain.py --live`, switches the root HBF on for the capture and off at the end,
   and checks that the HBF is off again. `--builder separate-stf` uses the older one-file-per-board layout.
+- `run --webctl 127.0.0.1:<port>` takes the run from the web controller instead of a fixed `--seconds` capture: initialize the devices,
+  press RUN and STOP as often as needed (change the run number in the page between runs), and press END to finish.
+  The Receiver output stays enabled for the whole session and is restored afterwards, as in a normal run.
 - The run number is given explicitly; the data file is `runXXXXXX.dat` (six digits) in the storage directory, and an existing file is never overwritten.
 - `<new-dir>` must not exist. `report.json` there records the result, every command, and every response.
 - Any unexpected response stops the action. Nothing is retried, reset, or repaired automatically.
