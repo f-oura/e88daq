@@ -29,6 +29,10 @@ run-control/daqctl.py run     --reader "$READER" --writer "$WRITER" --set-hbfsta
 - `run --webctl 127.0.0.1:<port>` takes the run from the web controller instead of a fixed `--seconds` capture: initialize the devices,
   press RUN and STOP as often as needed (change the run number in the page between runs), and press END to finish.
   The Receiver output stays enabled for the whole session and is restored afterwards, as in a normal run.
+- `session-server.py` serves a small page (loopback only, behind the password-protected proxy in `../web/`) that starts
+  such a `--webctl` session with an explicit run number and shows the result of the last one. Before starting it checks that
+  no session or other board-touching process is running and that the run file does not exist. The command it runs is set in
+  `config/local/session.env` (template: `config/session.env.example`).
 - The run number is given explicitly; the data file is `runXXXXXX.dat` (six digits) in the storage directory, and an existing file is never overwritten.
 - `<new-dir>` must not exist. `report.json` there records the result, every command, and every response.
 - Any unexpected response stops the action. Nothing is retried, reset, or repaired automatically.
