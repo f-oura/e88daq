@@ -57,6 +57,11 @@ Normally these are started by `run-control/daqctl.py`, not by hand.
     next run or the end of the session. If it fails with the E88 parameters (`--e88-param`), it is restarted once without them.
     A failing analyzer or a port in use is recorded in `online_analyzer` of `report.json` and never stops the run.
     The analyzer does not answer HTTP while it waits for new data (before the first time frame of a run, in pauses, after STOP).
+  - `--no-file` starts no FileSink, so no run file is written; the TimeFrameBuilder runs with `--discard-output true` and
+    discards the time frames (it logs one error line per time frame, about 0.1 kB). Side-output filters are skipped (recorded as
+    `side_filter_skipped`). With `--analyzer-http`, `nda-online-monitor` reads the `dqm` side output instead of a file: the
+    TimeFrameBuilder sends to it only when it can take a time frame, so it never holds the DAQ back. The device takes its run number
+    when it starts (the session's first run number), answers HTTP only while RUNNING, and may fail without stopping the session.
   - Every invocation starts its own Redis on 127.0.0.1 (with the RedisTimeSeries module that TimeFrameBuilder needs for metrics)
     and stops only the processes it started.
 - `scripts/run-board-chain.sh` — one board: `AmQStrTdcSampler` → `STFBuilder` → `FileSink`.

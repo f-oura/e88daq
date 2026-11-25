@@ -21,6 +21,10 @@ run<NNNNNN>_ps.dat. One side-output filter per session.
 --analyzer-http ADDR:PORT runs the online analyzer (nda-replay --follow) on the run file being written and serves its
 histograms there (THttpServer / JSROOT). It reads the file only, so it cannot slow the DAQ down; a new run file (a new
 run number at RUN) gets a new analyzer, and the last one keeps serving until the next run or the end of the session.
+--no-file writes no run file: no FileSink is started and the TimeFrameBuilder discards every time frame it cannot send
+(--discard-output true; it logs one error line per time frame). Side-output filters are skipped (they write files).
+With --analyzer-http the online analyzer then reads the "dqm" side output of the TimeFrameBuilder directly
+(nda-online-monitor, best effort: the TimeFrameBuilder sends only when the analyzer can take a time frame).
 """
 import argparse,json,math,os,re,shlex,signal,socket,subprocess,time,sys
 from pathlib import Path
@@ -90,6 +94,8 @@ def main():
     p.add_argument('--sc-filter-exe',type=Path,default=ROOT/'build/online-filter/bin/e88-sc-filter-device',help='filter device executable (both kinds)')
     p.add_argument('--analyzer-http',metavar='ADDR:PORT',help='run the online analyzer on the run file and serve its histograms here (for example 127.0.0.1:18090); uses --e88-param when given')
     p.add_argument('--analyzer-exe',type=Path,default=ROOT/'build/online-analyzer/bin/nda-replay',help='online analyzer executable (nda-replay)')
+    p.add_argument('--monitor-exe',type=Path,default=ROOT/'build/online-analyzer/bin/nda-online-monitor',help='online analyzer device for --no-file (nda-online-monitor)')
+    p.add_argument('--no-file',action='store_true',help='write no run file (no FileSink); with --analyzer-http the analyzer reads the dqm side output')
     a=p.parse_args()
     if not a.prefix or a.seconds<=0 or not math.isfinite(a.seconds) or a.output.exists():p.error('prefix required, seconds positive, output must be new')
     a.output=a.output.resolve();a.prefix=a.prefix.resolve()
@@ -110,6 +116,11 @@ def main():
     data_file=output_path(data_dir,a.run_number)
     if a.sc_filter_prescale is not None and a.prescale_filter is not None:p.error('one side-output filter per session: --sc-filter-prescale or --prescale-filter')
     sc_filter=a.sc_filter_prescale is not None or a.prescale_filter is not None
+    skipped_filter=None
+    if a.no_file and sc_filter:
+        # The filters write files of their own and use the dqm output that the analyzer takes in this mode.
+        skipped_filter='--sc-filter-prescale' if a.sc_filter_prescale is not None else '--prescale-filter'
+        sc_filter=False
     if sc_filter:
         kind,suffix,factor=('sc','sc',a.sc_filter_prescale) if a.sc_filter_prescale is not None else ('prescale','ps',a.prescale_filter)
         if factor<1:p.error('the prescale factor must be at least 1')
@@ -121,11 +132,13 @@ def main():
     if a.analyzer_http:
         try:parse_http(a.analyzer_http)
         except ValueError as exc:p.error(str(exc))
-        if not a.analyzer_exe.is_file():p.error(f'online analyzer not built: {a.analyzer_exe}')
+        exe=a.monitor_exe if a.no_file else a.analyzer_exe
+        if not exe.is_file():p.error(f'online analyzer not built: {exe}')
         if a.e88_param and not a.e88_param.is_file():p.error(f'no parameter index: {a.e88_param}')
     a.output.mkdir(parents=True,exist_ok=bool(a.replay and not a.data_dir))
     env=dict(os.environ);env['LD_LIBRARY_PATH']=f'{a.prefix}/lib64:{a.prefix}/lib:'+env.get('LD_LIBRARY_PATH','')
-    procs={};logs={};hbf_attempted=False;hbf_off_attempted=False;report={'mode':('replay' if a.replay else 'live')+('+webctl' if a.webctl else ''),'hardware_control':'Root HBF gate' if a.set_hbfstate else 'none','setup_manifest':str(a.manifest),'hbf_events':[],'run_number':a.run_number,'data_file':str(data_file),'sources':{},'states':{},'commands':{}}
+    procs={};logs={};hbf_attempted=False;hbf_off_attempted=False;report={'mode':('replay' if a.replay else 'live')+('+webctl' if a.webctl else ''),'hardware_control':'Root HBF gate' if a.set_hbfstate else 'none','setup_manifest':str(a.manifest),'hbf_events':[],'run_number':a.run_number,'data_file':None if a.no_file else str(data_file),'no_file':a.no_file,'sources':{},'states':{},'commands':{}}
+    if skipped_filter:report['side_filter_skipped']=f'{skipped_filter}: not run with --no-file'
     def launch(key,command):
         logs[key]=open(a.output/f'{key}.log','w')
         procs[key]=subprocess.Popen([str(x) for x in command],stdout=logs[key],stderr=subprocess.STDOUT,env=env,cwd=ROOT)
@@ -137,10 +150,10 @@ def main():
         found=re.findall(r'\] ([A-Z ]+)---> ([A-Z ]+)',text)
         return found[-1][1].strip() if found else ''
     def drive(command,target,keys=None):
-        deadline=time.monotonic()+35;keys=keys or devices
+        deadline=time.monotonic()+35;keys=[k for k in (keys or devices) if k not in optional]
         while time.monotonic()<deadline:
             for key in devices:
-                if procs[key].poll() is not None:raise RuntimeError(f'{key} exited ({procs[key].returncode}) before {target}')
+                if key not in optional and procs[key].poll() is not None:raise RuntimeError(f'{key} exited ({procs[key].returncode}) before {target}')
             r('PUBLISH','daqctl',json.dumps({'command':'change_state','value':command,'services':['all'],'instances':['all']}))
             for _ in range(10):
                 if all(state(key)==target for key in keys):return
@@ -155,8 +168,13 @@ def main():
         except Exception as exc:
             event['error']=str(exc);raise
     started=time.time()
-    follower=None;analyzer_logs=[]
-    if a.analyzer_http:
+    follower=None;analyzer_logs=[];monitor=False
+    if a.analyzer_http and a.no_file:
+        # Best effort on the dqm output; skipped (and recorded) when the port is taken, the DAQ starts anyway.
+        monitor=port_free(a.analyzer_http)
+        report['online_analyzer']={'http':a.analyzer_http,'input':'dqm','executable':str(a.monitor_exe.resolve()),'e88_param':str(a.e88_param.resolve()) if a.e88_param else None}
+        if not monitor:report['online_analyzer']['error']='analyzer port in use; not started'
+    elif a.analyzer_http:
         fems=[str(setup['data_sources'][role]['endpoint']) for role in roles.values()]
         param=a.e88_param.resolve() if a.e88_param else None
         def spawn(command,log_path):
@@ -171,7 +189,8 @@ def main():
     redisconf=a.output/'redis.conf'
     redisconf.write_text(f'bind 127.0.0.1\nport {port}\nprotected-mode yes\nsave ""\nappendonly no\ndir {a.output}\n')
     tag=str(os.getpid());inputs=[svc.replace('STF','Input') for svc in roles]
-    devices=['FileSink',*(['FilterSink','ScFilter'] if sc_filter else []),'TimeFrameBuilder',*roles]
+    devices=[*([] if a.no_file else ['FileSink']),*(['FilterSink','ScFilter'] if sc_filter else []),*(['OnlineMonitor'] if monitor else []),'TimeFrameBuilder',*roles]
+    optional={'OnlineMonitor'}  # may fail without stopping the DAQ
     if not a.replay:devices+=inputs
     try:
         module=a.prefix/'lib64/redis/modules/redistimeseries.so'
@@ -188,8 +207,13 @@ def main():
         r('TS.ADD','tfb-readiness','*',0)
         r('SET','run_info:run_number',a.run_number)
         # One pull socket with one distinct peer per STF source; no source cross-talk.
-        endpoints=[('FileSink','in','pull','connect'),('TimeFrameBuilder','out','push','bind'),('TimeFrameBuilder','in','pull','bind')]
-        links=[('TimeFrameBuilder','out','FileSink','in')]
+        endpoints=[('TimeFrameBuilder','out','push','bind'),('TimeFrameBuilder','in','pull','bind')]
+        links=[]
+        if not a.no_file:
+            endpoints.append(('FileSink','in','pull','connect'));links.append(('TimeFrameBuilder','out','FileSink','in'))
+        if monitor:
+            endpoints+=[('TimeFrameBuilder','dqm','push','bind'),('OnlineMonitor','in','pull','connect')]
+            links.append(('TimeFrameBuilder','dqm','OnlineMonitor','in'))
         if sc_filter:
             # Side output: TimeFrameBuilder dqm -> ScFilter -> FilterSink (run<NNNNNN>_sc.dat or _ps.dat).
             endpoints+=[('TimeFrameBuilder','dqm','push','bind'),('ScFilter','in','pull','connect'),('ScFilter','out','push','bind'),('FilterSink','in','pull','connect')]
@@ -205,15 +229,19 @@ def main():
         for svc in devices:r('SETEX',f'daq_service:{svc}:{svc}-{tag}:presence',120,'owned-launcher-placeholder')
         common=['-S',f'<{a.prefix}/lib64','-P','daq_service','-P','parameter_config','--registry-uri',f'tcp://127.0.0.1:{port}/0','--parameter-config-uri',f'tcp://127.0.0.1:{port}/2','--severity','debug','--color','0']
         def command(service,exe,args):return [exe,*common,'--service-name',service,'--id',f'{service}-{tag}',*args]
-        launch('FileSink',command('FileSink',a.prefix/'bin/FileSink',['--in-chan-name','in','--prefix',data_file.parent,'--run-number-format','run{:06d}','--run_number',str(a.run_number),'--ext','.dat','--openmode','create','--discard','false','--multipart','false']))
+        if not a.no_file:launch('FileSink',command('FileSink',a.prefix/'bin/FileSink',['--in-chan-name','in','--prefix',data_file.parent,'--run-number-format','run{:06d}','--run_number',str(a.run_number),'--ext','.dat','--openmode','create','--discard','false','--multipart','false']))
         if sc_filter:
             launch('FilterSink',command('FilterSink',a.prefix/'bin/FileSink',['--in-chan-name','in','--prefix',data_file.parent,'--run-number-format','run{:06d}_'+suffix,'--run_number',str(a.run_number),'--ext','.dat','--openmode','create','--discard','false','--multipart','false']))
             args=['--in-chan-name','in','--out-chan-name','out','--run_number',str(a.run_number),'--marks-dir',data_file.parent,'--kind',kind,'--prescale',str(factor)]
             if kind=='sc':args+=['--e88-param',a.e88_param.resolve()]
             launch('ScFilter',command('ScFilter',a.sc_filter_exe.resolve(),args))
             report['side_filter']={'kind':kind,'prescale':factor,'e88_param':str(a.e88_param.resolve()) if kind=='sc' else None,'executable':str(a.sc_filter_exe.resolve())}
+        if monitor:
+            margs=['--in-chan-name','in','--http',f'http:{a.analyzer_http}','--monitor-run-number',str(a.run_number),'--expect-fem',','.join(str(setup['data_sources'][role]['endpoint']) for role in roles.values())]
+            if a.e88_param:margs+=['--e88-param',a.e88_param.resolve()]
+            launch('OnlineMonitor',command('OnlineMonitor',a.monitor_exe.resolve(),margs))
         for group in ['TimeFrameBuilder',f'TimeFrameBuilder-{tag}']:r('HSET','parameters:'+group,'metrics-uri',f'tcp://127.0.0.1:{port}/0',db=2)
-        launch('TimeFrameBuilder',command('TimeFrameBuilder',a.prefix/'bin/TimeFrameBuilder',['--in-chan-name','in','--out-chan-name','out','--buffer-timeout','2000','--buffer-depth-limit','10000','--output-incomplete-tf','true','--discard-output','false']))
+        launch('TimeFrameBuilder',command('TimeFrameBuilder',a.prefix/'bin/TimeFrameBuilder',['--in-chan-name','in','--out-chan-name','out','--buffer-timeout','2000','--buffer-depth-limit','10000','--output-incomplete-tf','true','--discard-output','true' if a.no_file else 'false']))
         for index,(svc,role) in enumerate(roles.items()):
             b=setup['data_sources'][role];report['sources'][svc]={'endpoint':b['endpoint'],'serial':b['serial'],'tdc_type':b['tdc_type_label']}
             if a.replay:
@@ -234,21 +262,23 @@ def main():
                 try:return int(r('GET','run_info:run_number'))
                 except (subprocess.CalledProcessError,ValueError):return None
             analyzer_poll=(lambda:follower.poll(current_run())) if follower else (lambda:None)
-            run_webctl(a,launch,procs,logs,env,devices,inputs,setup,port,report,keep_presence,analyzer_poll)
+            run_webctl(a,launch,procs,logs,env,devices,inputs,setup,port,report,keep_presence,analyzer_poll,optional)
             return
         for cmd,target in [('INIT DEVICE','INITIALIZED'),('BIND','BOUND'),('CONNECT','DEVICE READY'),('INIT TASK','READY')]:drive(cmd,target)
         tftext=(a.output/'TimeFrameBuilder.log').read_text(errors='replace')
         if not re.search(rf'number of source = {len(roles)}\b',tftext):raise RuntimeError(f'TimeFrameBuilder did not bind exactly {len(roles)} input peers')
-        drive('RUN','RUNNING',keys=['FileSink','TimeFrameBuilder',*(['FilterSink','ScFilter'] if sc_filter else [])] if a.replay else devices)
+        drive('RUN','RUNNING',keys=[*([] if a.no_file else ['FileSink']),'TimeFrameBuilder',*(['FilterSink','ScFilter'] if sc_filter else [])] if a.replay else devices)
         if not a.replay:
             wait_sampler_tcp(procs, a.output, inputs)
-        print(f'RUNNING: {len(roles)} STF peers -> TimeFrameBuilder -> FileSink',flush=True)
+        print(f'RUNNING: {len(roles)} STF peers -> TimeFrameBuilder -> '+('(no file)' if a.no_file else 'FileSink'),flush=True)
         if a.set_hbfstate:
             hbf_attempted=True;hbf('on')
         deadline=time.monotonic()+a.seconds
         while time.monotonic()<deadline:
             for key in devices:
-                if procs[key].poll() is not None:raise RuntimeError(f'{key} exited during capture')
+                if procs[key].poll() is not None:
+                    if key in optional:report.setdefault('optional_exits',{})[key]=procs[key].returncode;continue
+                    raise RuntimeError(f'{key} exited during capture')
             if follower:follower.poll(a.run_number)
             time.sleep(.2)
         if a.set_hbfstate:
@@ -258,9 +288,11 @@ def main():
         r('PUBLISH','daqctl',json.dumps({'command':'change_state','value':'END','services':['all'],'instances':['all']}))
         for key in reversed(devices):
             try:procs[key].wait(timeout=10)
-            except subprocess.TimeoutExpired:raise RuntimeError(f'{key} did not end cleanly')
+            except subprocess.TimeoutExpired:
+                if key in optional:continue
+                raise RuntimeError(f'{key} did not end cleanly')
         report['exit_codes']={k:procs[k].returncode for k in devices}
-        if any(report['exit_codes'].values()):raise RuntimeError('nonzero device exit')
+        if any(v for k,v in report['exit_codes'].items() if k not in optional):raise RuntimeError('nonzero device exit')
         report['status']='CAPTURE_COMPLETE'
     except Exception as exc:
         report['status']='FAILED';report['error']=str(exc);raise
@@ -294,7 +326,7 @@ def main():
                     except ValueError as exc:summaries[f.name]={'unreadable':str(exc)}
             report['side_filter_summaries']=summaries
         (a.output/'report.json').write_text(json.dumps(report,indent=2)+'\n')
-def run_webctl(a,launch,procs,logs,env,devices,inputs,setup,port,report,keep_presence,analyzer_poll=lambda:None):
+def run_webctl(a,launch,procs,logs,env,devices,inputs,setup,port,report,keep_presence,analyzer_poll=lambda:None,optional=()):
     """Start daq-webctl with the HBF hooks and wait until the devices end or a signal arrives."""
     hook=[sys.executable,str(ROOT/'nestdaq/scripts/webctl-hook.py')]
     opts=['--output',str(a.output),'--inputs',*([] if a.replay else inputs)]
@@ -311,7 +343,8 @@ def run_webctl(a,launch,procs,logs,env,devices,inputs,setup,port,report,keep_pre
     print(f'WEBCTL: http://{a.webctl}/daq-webctl.html  ({len(inputs)} sources; END in the browser or Ctrl-C ends the session)',flush=True)
     try:
         last=0
-        while any(procs[k].poll() is None for k in devices):
+        # The session ends when the DAQ devices have exited; an optional device left over is stopped by the caller.
+        while any(procs[k].poll() is None for k in devices if k not in optional):
             if procs['webctl'].poll() is not None:
                 restarts.append({'time':time.time(),'returncode':procs['webctl'].returncode})
                 report['webctl_restarts']=restarts

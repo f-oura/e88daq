@@ -165,6 +165,21 @@ class WebctlTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d, patch.object(m,'inspect') as inspect, patch.object(m,'capture_with_receiver_output') as capture:
             rc=m.main(SETUP+['run','--reader','/r','--writer','/w','--set-hbfstate','/h','--out',d+'/run','--builder','separate-stf','--analyzer-http','127.0.0.1:18090'])
             self.assertEqual(rc,2);inspect.assert_not_called();capture.assert_not_called()
+    def test_no_file_passed_to_timeframe_chain(self):
+        cmd=self.run_with(['--webctl','127.0.0.1:8080','--no-file','--analyzer-http','127.0.0.1:18090','--sc-filter-prescale','100','--e88-param','/p/index.txt'])
+        self.assertIn('--no-file',cmd);self.assertIn('--analyzer-http',cmd)
+        # the chain decides to skip the filter; daqctl passes the options unchanged
+        self.assertIn('--sc-filter-prescale',cmd)
+    def test_no_file_outcome(self):
+        with tempfile.TemporaryDirectory() as d:
+            out=pathlib.Path(d)/'run';(out/'timeframe').mkdir(parents=True)
+            (out/'timeframe'/'hooks.jsonl').write_text(m.json.dumps({'event':'post-run','status':'OK'})+'\n')
+            r=m.capture_outcome(out,pathlib.Path(d)/'run000042.dat','127.0.0.1:8080',no_file=True)
+        self.assertEqual(r['result'],'NO_FILE');self.assertEqual(r['runs_started'],1)
+    def test_no_file_rejected_outside_timeframe_run(self):
+        with tempfile.TemporaryDirectory() as d, patch.object(m,'inspect') as inspect:
+            rc=m.main(SETUP+['run','--reader','/r','--writer','/w','--set-hbfstate','/h','--out',d+'/run','--builder','separate-stf','--no-file'])
+            self.assertEqual(rc,2);inspect.assert_not_called()
     def test_webctl_rejected_outside_timeframe_run(self):
         with tempfile.TemporaryDirectory() as d, patch.object(m,'inspect') as inspect:
             rc=m.main(SETUP+['status','--reader','/r','--out',d+'/s','--webctl','127.0.0.1:8080'])

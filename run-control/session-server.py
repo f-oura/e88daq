@@ -7,7 +7,8 @@ start a new one with an explicit run number. Before starting it checks that no s
 other board-touching process is running and that the run file does not exist yet.
 
 Configuration (a bash file, see config/session.env.example):
-  SESSION_COMMAND   command run through bash; {run_number} and {out} are substituted
+  SESSION_COMMAND   command run through bash; {run_number} and {out} are substituted. When the page asks for
+                    no data file, {no_file} becomes --no-file (without {no_file}, --no-file is appended)
   SESSION_OUT_BASE  directory for one evidence directory per session
   SESSION_DATA_DIR  directory of runXXXXXX.dat files
   SESSION_WEBCTL    host:port where the session's daq-webctl listens
@@ -63,6 +64,14 @@ def listening(hostport):
         return False
 
 
+def session_command(template, run_number, out, no_file=False):
+    command = template.replace('{run_number}', str(run_number)).replace('{out}', shlex.quote(str(out)))
+    flag = '--no-file' if no_file else ''
+    if '{no_file}' in command:
+        return command.replace('{no_file}', flag)
+    return command + (' ' + flag if flag else '')
+
+
 class Sessions:
     def __init__(self, env, config_path):
         self.env, self.config_path = env, config_path
@@ -83,7 +92,7 @@ class Sessions:
             report = Path(info['out']) / 'report.json'
             if report.exists():
                 r = json.loads(report.read_text())
-                info['report'] = {k: r.get(k) for k in ('result', 'error', 'root_hbf_post', 'run_number', 'data_file', 'runs_started', 'note')}
+                info['report'] = {k: r.get(k) for k in ('result', 'error', 'root_hbf_post', 'run_number', 'data_file', 'runs_started', 'note', 'no_file')}
                 self.current.write_text(json.dumps(info))
         info['running'] = alive
         info['controller_up'] = alive and listening(self.env['SESSION_WEBCTL'])
@@ -93,7 +102,7 @@ class Sessions:
         numbers = [int(m.group(1)) for p in self.data.glob('run*.dat') if (m := re.fullmatch(r'run(\d{6})\.dat', p.name))]
         return max(numbers, default=0) + 1
 
-    def start(self, run_number):
+    def start(self, run_number, no_file=False):
         with self.lock:
             if self.state().get('running'):
                 raise ValueError('a session is already running')
@@ -107,16 +116,16 @@ class Sessions:
             if busy:
                 raise ValueError('other DAQ or board processes are running: ' + '; '.join(busy))
             out = self.base / time.strftime(f'%Y%m%d-%H%M%S-run{run_number:06d}')
-            command = self.env['SESSION_COMMAND'].replace('{run_number}', str(run_number)).replace('{out}', shlex.quote(str(out)))
+            command = session_command(self.env['SESSION_COMMAND'], run_number, out, no_file)
             log = open(self.base / f'{out.name}.log', 'w')
             self.proc = subprocess.Popen(['bash', '-c', command], cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
                                          start_new_session=True, env={**os.environ, **self.env})
             info = {'pid': self.proc.pid, 'run_number': run_number, 'out': str(out), 'log': log.name,
-                    'command': command, 'started': time.time(), 'ended': None}
+                    'command': command, 'started': time.time(), 'ended': None, 'no_file': no_file}
             self.current.write_text(json.dumps(info))
             threading.Thread(target=self._watch, args=(self.proc, log), daemon=True).start()
             with open(self.base / 'sessions.jsonl', 'a') as f:
-                f.write(json.dumps({k: info[k] for k in ('run_number', 'out', 'started', 'command')}) + '\n')
+                f.write(json.dumps({k: info[k] for k in ('run_number', 'out', 'started', 'command', 'no_file')}) + '\n')
 
     def _watch(self, proc, log):
         proc.wait()
@@ -154,7 +163,8 @@ def render(sessions, message=''):
     refresh = ''
     if s.get('running'):
         if s['controller_up']:
-            parts.append(f'<div class="box ok">Session running (run {s["run_number"]}). '
+            nofile = ' <b>No data file is written.</b>' if s.get('no_file') else ''
+            parts.append(f'<div class="box ok">Session running (run {s["run_number"]}).{nofile} '
                          f'<a href="../daq-webctl.html">Open the controller</a></div>')
         else:
             refresh = '<meta http-equiv="refresh" content="2">'
@@ -177,6 +187,7 @@ def render(sessions, message=''):
         parts.append('<div class="box">No session is running.</div>' + last)
         parts.append(f'''<form class="box" method="post" action="start">
 <label>Run number <input type="number" name="run_number" min="1" max="999999" required value="{sessions.next_run_number()}"></label>
+<p><label><input type="checkbox" name="no_file" value="1"> Do not write data files (the online analyzer reads the data stream; no side-output filters)</label></p>
 <button type="submit">Start session</button></form>''')
     return PAGE.format(refresh=refresh, body='\n'.join(parts))
 
@@ -216,7 +227,7 @@ class Handler(BaseHTTPRequestHandler):
         form = urllib.parse.parse_qs(self.rfile.read(min(length, 4096)).decode())
         try:
             run_number = int(form.get('run_number', [''])[0])
-            self.sessions.start(run_number)
+            self.sessions.start(run_number, form.get('no_file', [''])[0] == '1')
         except (ValueError, OSError) as exc:
             return self.send(409, render(self.sessions, f'Not started: {exc}'))
         self.send(303, '', headers=[('Location', './')])

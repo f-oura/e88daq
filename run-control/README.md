@@ -37,10 +37,13 @@ run-control/daqctl.py run     --reader "$READER" --writer "$WRITER" --set-hbfsta
   histograms there (ROOT THttpServer / JSROOT). It follows the run file being written (`nda-replay --follow`), so it never
   slows the DAQ down; each new run file gets a new analyzer, and the last one keeps serving until the session ends.
   `--e88-param` gives it the E88 parameters as well. Build the analyzer first (`../nestdaq/README.md`).
-- `session-server.py` serves a small page (loopback only, behind the password-protected proxy of the experiment portal) that starts
-  such a `--webctl` session with an explicit run number and shows the result of the last one. Before starting it checks that
-  no session or other board-touching process is running and that the run file does not exist. The command it runs is set in
-  `config/local/session.env` (template: `config/session.env.example`).
+- `run --no-file` (timeframe run) writes no run file: there is no FileSink, and the TimeFrameBuilder discards the time frames.
+  Side-output filters are skipped. With `--analyzer-http` the analyzer reads the data stream instead (the TimeFrameBuilder side
+  output, best effort: time frames the analyzer cannot take in time are skipped for it). The result is `NO_FILE`.
+- `session-server.py` serves a small page (loopback only, behind the password-protected proxy of the experiment portal) that
+  starts such a `--webctl` session with an explicit run number and shows the result of the last one. A checkbox starts the
+  session with `--no-file`. Before starting it checks that no session or other board-touching process is running and that the
+  run file does not exist. The command it runs is set in `config/local/session.env` (template: `config/session.env.example`).
 - The run number is given explicitly; the data file is `runXXXXXX.dat` (six digits) in the storage directory, and an existing file is never overwritten.
 - `<new-dir>` must not exist. `report.json` there records the result, every command, and every response.
 - Any unexpected response stops the action. Nothing is retried, reset, or repaired automatically.
@@ -49,6 +52,6 @@ run-control/daqctl.py run     --reader "$READER" --writer "$WRITER" --set-hbfsta
 there, or (with `--webctl`) RUN was pressed at least once (`runs_started`; if the run number was changed in the page, the file
 has another name and `note` says so). Check the data with `../tools/` before trusting it. `NO_DATA` means the session ended
 without data: no RUN was pressed in the web controller, or a fixed capture wrote no file. `data_file_exists` and
-`data_file_bytes` are recorded in both cases.
+`data_file_bytes` are recorded in both cases. `NO_FILE` is the result of a `--no-file` session (with `runs_started`).
 
 Planned: run list entries (YAML) per run, configuration snapshots with SHA-256, and run start/stop records.

@@ -84,12 +84,20 @@ def capture_with_receiver_output(reader, writer, receiver_ip, root_ip, command, 
             raise RuntimeError('Receiver control restoration mismatch; stop without retry')
 
 
-def capture_outcome(out, data_file, webctl):
+def capture_outcome(out, data_file, webctl, no_file=False):
     """Result of a timeframe run from what it left behind, not only from the process exit codes.
 
     The data file of the run number given at the start and the RUN hooks of the web controller tell whether
     data can exist: a session ended without any RUN, or a fixed capture that wrote no file, has no data.
+    A session started with --no-file writes no file on purpose: its result is NO_FILE.
     """
+    if no_file:
+        info = {'result': 'NO_FILE', 'data_file_exists': False}
+        if webctl:
+            path = out / 'timeframe' / 'hooks.jsonl'
+            hooks = [json.loads(x) for x in path.read_text().splitlines() if x.strip()] if path.exists() else []
+            info['runs_started'] = sum(1 for h in hooks if h.get('event') == 'post-run' and h.get('status') == 'OK')
+        return info
     info = {'data_file_exists': data_file.exists()}
     if info['data_file_exists']:
         info['data_file_bytes'] = data_file.stat().st_size
@@ -128,6 +136,7 @@ def main(argv=None):
     ap.add_argument('--e88-param', help='E88 parameter index for the SC filter (required with --sc-filter-prescale) and the online analyzer')
     ap.add_argument('--prescale-filter', type=int, metavar='N', help='timeframe run: also write run<NNNNNN>_ps.dat with 1 of N time frames (plain prescale on the side output)')
     ap.add_argument('--analyzer-http', metavar='ADDR:PORT', help='timeframe run: run the online analyzer on the run file and serve its histograms here')
+    ap.add_argument('--no-file', action='store_true', help='timeframe run: write no run file (side-output filters are skipped; the online analyzer reads the data stream)')
     args = ap.parse_args(argv)
     out = pathlib.Path(args.out).resolve()
     out.mkdir(parents=True, exist_ok=False)
@@ -160,6 +169,9 @@ def main(argv=None):
             raise ValueError('--analyzer-http applies to the timeframe run only')
         if args.analyzer_http:
             result['online_analyzer'] = {'http': args.analyzer_http, 'e88_param': args.e88_param}
+        if args.no_file and (args.action != 'run' or args.builder != 'timeframe'):
+            raise ValueError('--no-file applies to the timeframe run only')
+        result['no_file'] = args.no_file
         if args.sc_filter_prescale is not None or args.prescale_filter is not None:
             if args.action != 'run' or args.builder != 'timeframe':
                 raise ValueError('side-output filters apply to the timeframe run only')
@@ -206,6 +218,8 @@ def main(argv=None):
                     cmd += ['--analyzer-http', args.analyzer_http]
                     if args.e88_param and args.sc_filter_prescale is None:
                         cmd += ['--e88-param', args.e88_param]
+                if args.no_file:
+                    cmd += ['--no-file']
             else:
                 cmd = [sys.executable, str(ROOT/'nestdaq/scripts/run-separate-stf.py'), '--root', root['endpoint'], '--set-hbfstate', args.set_hbfstate, '--on', str(args.seconds), '--summary', str(out/'capture.json')]
                 for name, board in boards.items():
@@ -225,7 +239,7 @@ def main(argv=None):
         if args.action != 'run':
             result['result'] = 'READY'
         elif args.builder == 'timeframe':
-            result.update(capture_outcome(out, data_file, args.webctl))
+            result.update(capture_outcome(out, data_file, args.webctl, args.no_file))
         else:
             result['result'] = 'CAPTURE_COMPLETED_REQUIRES_DECODE'
     except Exception as exc:
