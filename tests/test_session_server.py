@@ -46,5 +46,45 @@ class StartTests(unittest.TestCase):
             self.assertTrue(log.strip().endswith('--no-file'))
 
 
+class ControllerApiTests(unittest.TestCase):
+    def session(self, d, no_file=False, with_settings=True):
+        env = {'SESSION_OUT_BASE': f'{d}/out', 'SESSION_DATA_DIR': f'{d}/data', 'SESSION_WEBCTL': '127.0.0.1:1',
+               'SESSION_COMMAND': 'sleep 30'}
+        pathlib.Path(f'{d}/data').mkdir()
+        s = m.Sessions(env, None)
+        with patch.object(m, 'busy_processes', return_value=[]), patch.object(m, 'listening', return_value=False):
+            s.start(18, no_file=no_file)
+        out = pathlib.Path(json.loads(s.current.read_text())['out'])
+        (out / 'timeframe').mkdir(parents=True)
+        if with_settings:
+            (out / 'timeframe' / 'run-settings.txt').write_text('kind sc\nprescale 100\n')
+        return s, out
+
+    def test_settings(self):
+        with tempfile.TemporaryDirectory() as d:
+            s, out = self.session(d)
+            try:
+                self.assertEqual(s.get_settings(), {'available': True, 'kind': 'sc', 'prescale': 100})
+                self.assertEqual(s.set_settings('prescale', 10)['kind'], 'prescale')
+                self.assertEqual((out / 'timeframe' / 'run-settings.txt').read_text(), 'kind prescale\nprescale 10\n')
+                with self.assertRaises(ValueError):
+                    s.set_settings('none', 10)
+                self.assertEqual(len((out / 'run-settings.jsonl').read_text().splitlines()), 1)
+            finally:
+                s.proc.kill(); s.proc.wait()
+            time.sleep(0.2)
+            self.assertEqual(s.get_settings(), {'available': False})
+            with self.assertRaises(ValueError):
+                s.set_settings('sc', 10)
+
+    def test_no_filter_no_settings(self):
+        with tempfile.TemporaryDirectory() as d:
+            s, out = self.session(d, with_settings=False)
+            try:
+                self.assertEqual(s.get_settings(), {'available': False})
+            finally:
+                s.proc.kill(); s.proc.wait()
+
+
 if __name__ == '__main__':
     unittest.main()

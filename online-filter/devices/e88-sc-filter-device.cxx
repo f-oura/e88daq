@@ -23,6 +23,7 @@
 #include <string>
 #include <vector>
 
+#include "RunSettings.hh"
 #include "ScFilterRun.hh"
 
 namespace bpo = boost::program_options;
@@ -45,11 +46,13 @@ struct OptionKey {
   static constexpr const char* ChannelMap = "e88-channel-map";
   static constexpr const char* Settings = "e88-settings";
   static constexpr const char* AllowUnassigned = "e88-allow-unassigned";
+  static constexpr const char* RunSettingsFile = "run-settings";
+  static constexpr const char* Suffix = "suffix";
 };
 
-std::string RunStem(std::uint64_t run, e88filter::FilterKind kind) {
-  char b[40];
-  std::snprintf(b, sizeof(b), "run%06llu_%s", static_cast<unsigned long long>(run), e88filter::KindSuffix(kind));
+std::string RunStem(std::uint64_t run, const std::string& suffix) {
+  char b[64];
+  std::snprintf(b, sizeof(b), "run%06llu_%s", static_cast<unsigned long long>(run), suffix.c_str());
   return b;
 }
 
@@ -76,6 +79,11 @@ class ScFilterDevice : public fair::mq::Device {
     fOptions.param.channelMap = fConfig->GetProperty<std::string>(OptionKey::ChannelMap);
     fOptions.param.settings = fConfig->GetProperty<std::string>(OptionKey::Settings);
     fOptions.param.allowUnassigned = fConfig->GetProperty<bool>(OptionKey::AllowUnassigned);
+    fRunSettingsPath = fConfig->GetProperty<std::string>(OptionKey::RunSettingsFile);
+    // The marks and summary names keep one suffix for the whole session (the side-output FileSink is started with it),
+    // also when the kind is changed between runs; the summary records the kind of each run.
+    fSuffix = fConfig->GetProperty<std::string>(OptionKey::Suffix);
+    if (fSuffix.empty()) fSuffix = e88filter::KindSuffix(fOptions.kind);
     LOG(info) << "e88-sc-filter: kind " << e88filter::KindName(fOptions.kind) << ", prescale " << fOptions.prescale << " offset " << fOptions.prescaleOffset
               << ", marks in " << fMarksDir;
   }
@@ -83,13 +91,34 @@ class ScFilterDevice : public fair::mq::Device {
   void PreRun() override {
     fRun = 0;
     if (fConfig->Count(OptionKey::RunNumber)) fRun = std::stoull(fConfig->GetProperty<std::string>(OptionKey::RunNumber));
-    fStem = fMarksDir + "/" + RunStem(fRun, fOptions.kind);
+    fStem = fMarksDir + "/" + RunStem(fRun, fSuffix);
     fSendFailed = 0;
     std::string error;
-    fActive = fFilter.Begin(fOptions, fRun, fStem + ".marks.tsv", error);
+    // Settings of this run: the ones given at the start, overridden by the run settings file when there is one.
+    fRunOptions = fOptions;
+    fRunKind = e88filter::KindName(fOptions.kind);
+    e88filter::RunSettings settings{fOptions.kind == e88filter::FilterKind::kSc ? "sc" : "prescale", fOptions.prescale};
+    bool settingsOk = true;
+    if (!fRunSettingsPath.empty()) {
+      settingsOk = e88filter::ReadRunSettings(fRunSettingsPath, settings, error);
+      if (settingsOk) LOG(info) << "e88-sc-filter: run settings " << fRunSettingsPath << ": kind " << settings.kind << ", prescale " << settings.prescale;
+    }
+    if (!settingsOk) {
+      fActive = false;
+    } else if (settings.kind == "off") {
+      fActive = false;
+      fRunKind = "off";
+      error = "filter off in this run (run settings)";
+    } else {
+      e88filter::ParseKind(settings.kind, fRunOptions.kind);
+      fRunOptions.prescale = settings.prescale;
+      fRunKind = e88filter::KindName(fRunOptions.kind);
+      fActive = fFilter.Begin(fRunOptions, fRun, fStem + ".marks.tsv", error);
+    }
     fError = fActive ? "" : error;
     if (!fActive) {
-      LOG(error) << "e88-sc-filter: run " << fRun << ": " << error << "; nothing is sent in this run";
+      if (fRunKind == "off") LOG(info) << "e88-sc-filter: run " << fRun << ": " << error << "; nothing is sent in this run";
+      else LOG(error) << "e88-sc-filter: run " << fRun << ": " << error << "; nothing is sent in this run";
       return;
     }
     for (std::size_t i = 0; i < fFilter.Params().files.size(); ++i)
@@ -135,7 +164,7 @@ class ScFilterDevice : public fair::mq::Device {
                 << c.scPass << ", prescaled " << c.prescaled << ", malformed " << c.malformed << "), send failed "
                 << fSendFailed;
     } else {
-      summary = "{\n  \"filter\": \"" + std::string(e88filter::KindName(fOptions.kind)) + "\",\n  \"device\": true,\n  \"run_number\": " + std::to_string(fRun) +
+      summary = "{\n  \"filter\": \"" + fRunKind + "\",\n  \"device\": true,\n  \"run_number\": " + std::to_string(fRun) +
                 ",\n  \"error\": " + e88filter::JsonString(fError) + ",\n  \"received\": " +
                 std::to_string(fReceivedInactive) + ",\n  \"kept\": 0\n}\n";
     }
@@ -150,8 +179,8 @@ class ScFilterDevice : public fair::mq::Device {
   }
 
  private:
-  std::string fIn, fOut, fMarksDir, fStem, fError;
-  e88filter::ScFilterOptions fOptions;
+  std::string fIn, fOut, fMarksDir, fStem, fError, fRunSettingsPath, fSuffix, fRunKind;
+  e88filter::ScFilterOptions fOptions, fRunOptions;
   e88filter::ScFilterRun fFilter;
   std::vector<std::uint64_t> fBuffer;
   std::uint64_t fRun = 0, fSendFailed = 0, fReceivedInactive = 0;
@@ -182,7 +211,11 @@ void addCustomOptions(bpo::options_description& options) {
     (OptionKey::ChannelMap, bpo::value<std::string>()->default_value(""), "E88 channel map, overrides the index")
     (OptionKey::Settings, bpo::value<std::string>()->default_value(""), "E88 settings, overrides the index")
     (OptionKey::AllowUnassigned, bpo::value<bool>()->default_value(false)->implicit_value(true),
-     "Skip E88 channel-map rows with '-' in fem_ip and ch instead of failing");
+     "Skip E88 channel-map rows with '-' in fem_ip and ch instead of failing")
+    (OptionKey::RunSettingsFile, bpo::value<std::string>()->default_value(""),
+     "File read at every RUN with 'kind sc|prescale|off' and 'prescale N' lines (empty: the start options for every run)")
+    (OptionKey::Suffix, bpo::value<std::string>()->default_value(""),
+     "Suffix of run<NNNNNN>_<suffix>.marks.tsv and .summary.json (default: sc or ps from --kind)");
 }
 
 std::unique_ptr<fair::mq::Device> getDevice(fair::mq::ProgOptions& /*config*/) { return std::make_unique<ScFilterDevice>(); }

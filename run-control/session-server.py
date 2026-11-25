@@ -12,6 +12,10 @@ Configuration (a bash file, see config/session.env.example):
   SESSION_OUT_BASE  directory for one evidence directory per session
   SESSION_DATA_DIR  directory of runXXXXXX.dat files
   SESSION_WEBCTL    host:port where the session's daq-webctl listens
+
+For the running session (under the same proxy):
+  GET  run-settings.json      settings of the side-output filter for the next RUN
+  POST run-settings           kind (sc, prescale, off) and prescale (N) for the next RUN
 """
 import argparse
 import html
@@ -23,11 +27,14 @@ import socket
 import subprocess
 import threading
 import time
+import sys
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'nestdaq/lib'))
+import run_settings  # noqa: E402
 BUSY = re.compile(r'(daqctl\.py|run-timeframe-chain\.py|run-board-chain\.sh|run-separate-stf\.py|AmQStrTdcSampler|'
                   r'/write_register|/set_hbfstate|/initialize|daq-webctl)(\s|$)')
 
@@ -127,6 +134,32 @@ class Sessions:
             with open(self.base / 'sessions.jsonl', 'a') as f:
                 f.write(json.dumps({k: info[k] for k in ('run_number', 'out', 'started', 'command', 'no_file')}) + '\n')
 
+    def settings_path(self):
+        s = self.state()
+        if not s.get('running') or not s.get('out'):
+            return None
+        path = Path(s['out']) / 'timeframe' / 'run-settings.txt'
+        return path if path.exists() else None
+
+    def get_settings(self):
+        path = self.settings_path()
+        if path is None:
+            return {'available': False}
+        try:
+            return {'available': True, **run_settings.read(path)}
+        except (OSError, ValueError) as exc:
+            return {'available': True, 'error': str(exc)}
+
+    def set_settings(self, kind, prescale):
+        with self.lock:
+            path = self.settings_path()
+            if path is None:
+                raise ValueError('no running session with a side-output filter')
+            run_settings.write(path, kind, prescale)
+            with open(Path(self.state()['out']) / 'run-settings.jsonl', 'a') as f:
+                f.write(json.dumps({'time': time.time(), 'kind': kind, 'prescale': prescale}) + '\n')
+        return self.get_settings()
+
     def _watch(self, proc, log):
         proc.wait()
         log.close()
@@ -212,19 +245,32 @@ class Handler(BaseHTTPRequestHandler):
             self.send(200, render(self.sessions))
         elif path == '/status.json':
             self.send(200, json.dumps(self.sessions.state()), 'application/json')
+        elif path == '/run-settings.json':
+            self.send(200, json.dumps(self.sessions.get_settings()), 'application/json')
         else:
             self.send(404, 'not found', 'text/plain')
 
     def do_POST(self):
-        if urllib.parse.urlsplit(self.path).path != '/start':
+        path = urllib.parse.urlsplit(self.path).path
+        if path not in ('/start', '/run-settings'):
             return self.send(404, 'not found', 'text/plain')
-        # Only accept forms posted from this page (same host), not from other sites.
+        # Only accept requests from these pages (same host), not from other sites.
         origin = self.headers.get('Origin') or self.headers.get('Referer') or ''
         host = self.headers.get('X-Forwarded-Host') or self.headers.get('Host') or ''
         if urllib.parse.urlsplit(origin).netloc != host:
+            if path == '/run-settings':
+                return self.send(403, json.dumps({'error': 'the request did not come from this page'}), 'application/json')
             return self.send(403, render(self.sessions, 'Refused: the request did not come from this page.'))
         length = int(self.headers.get('Content-Length') or 0)
         form = urllib.parse.parse_qs(self.rfile.read(min(length, 4096)).decode())
+        if path == '/run-settings':
+            try:
+                kind = form.get('kind', [''])[0]
+                prescale = int(form.get('prescale', [''])[0])
+                result = self.sessions.set_settings(kind, prescale)
+            except (ValueError, OSError) as exc:
+                return self.send(409, json.dumps({'error': str(exc)}), 'application/json')
+            return self.send(200, json.dumps(result), 'application/json')
         try:
             run_number = int(form.get('run_number', [''])[0])
             self.sessions.start(run_number, form.get('no_file', [''])[0] == '1')

@@ -17,7 +17,9 @@ The HBF is switched off again whenever the session ends.
 run<NNNNNN>_sc.dat next to the run file (marks and summary beside it). The run file itself is unchanged;
 the TimeFrameBuilder skips the side output when the filter cannot take a time frame.
 --prescale-filter N runs the plain prescale (one time frame out of N, content not read) the same way and writes
-run<NNNNNN>_ps.dat. One side-output filter per session.
+run<NNNNNN>_ps.dat. One side-output filter per session. The filter reads <output>/run-settings.txt at every RUN
+("kind sc|prescale|off", "prescale N"), so its kind and N can be changed between runs (the session page does this);
+the files keep the suffix of the session and the summary of each run records the kind and N used.
 --analyzer-http ADDR:PORT runs the online analyzer (nda-replay --follow) on the run file being written and serves its
 histograms there (THttpServer / JSROOT). It reads the file only, so it cannot slow the DAQ down; a new run file (a new
 run number at RUN) gets a new analyzer, and the last one keeps serving until the next run or the end of the session.
@@ -34,6 +36,7 @@ ROOT=Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(ROOT/'nestdaq/lib'))
 from run_storage import output_path
 from online_analyzer import RunFileFollower, analyzer_command, parse_http, port_free
+import run_settings
 
 
 def service_base(name):
@@ -271,10 +274,14 @@ def main():
         if not a.no_file:launch('FileSink',command('FileSink',a.prefix/'bin/FileSink',['--in-chan-name','in','--prefix',data_file.parent,'--run-number-format','run{:06d}','--run_number',str(a.run_number),'--ext','.dat','--openmode','create','--discard','false','--multipart','false']))
         if sc_filter:
             launch('FilterSink',command('FilterSink',a.prefix/'bin/FileSink',['--in-chan-name','in','--prefix',data_file.parent,'--run-number-format','run{:06d}_'+suffix,'--run_number',str(a.run_number),'--ext','.dat','--openmode','create','--discard','false','--multipart','false']))
-            args=['--in-chan-name','in','--out-chan-name','out','--run_number',str(a.run_number),'--marks-dir',data_file.parent,'--kind',kind,'--prescale',str(factor)]
-            if kind=='sc':args+=['--e88-param',a.e88_param.resolve()]
+            settings_file=a.output/'run-settings.txt'
+            run_settings.write(settings_file,kind,factor)
+            args=['--in-chan-name','in','--out-chan-name','out','--run_number',str(a.run_number),'--marks-dir',data_file.parent,'--kind',kind,'--prescale',str(factor),
+                  '--run-settings',settings_file,'--suffix',suffix]
+            # The parameters are given to the plain prescale too when known, so that a run can switch to the SC filter.
+            if a.e88_param:args+=['--e88-param',a.e88_param.resolve()]
             launch('ScFilter',command('ScFilter',a.sc_filter_exe.resolve(),args))
-            report['side_filter']={'kind':kind,'prescale':factor,'e88_param':str(a.e88_param.resolve()) if kind=='sc' else None,'executable':str(a.sc_filter_exe.resolve())}
+            report['side_filter']={'kind':kind,'prescale':factor,'e88_param':str(a.e88_param.resolve()) if a.e88_param else None,'executable':str(a.sc_filter_exe.resolve()),'run_settings':str(settings_file)}
         if monitor:
             margs=['--in-chan-name','in','--http',f'http:{a.analyzer_http}','--monitor-run-number',str(a.run_number),'--expect-fem',','.join(str(setup['data_sources'][role]['endpoint']) for role in roles.values())]
             if a.e88_param:margs+=['--e88-param',a.e88_param.resolve()]

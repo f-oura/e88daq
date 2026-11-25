@@ -25,7 +25,7 @@ add_library(e88filter_format STATIC
 target_include_directories(e88filter_format PUBLIC ${E88_ONLINE_ANALYZER_DIR}/core ${E88_ONLINE_ANALYZER_DIR}/experiments)
 target_include_directories(e88filter_format SYSTEM PUBLIC ${NESTDAQ_USER_IMPL_DIR})
 
-add_library(e88filter_core STATIC core/ScPairFilter.cc core/Params.cc core/ScFilterRun.cc)
+add_library(e88filter_core STATIC core/ScPairFilter.cc core/Params.cc core/ScFilterRun.cc core/RunSettings.cc)
 target_include_directories(e88filter_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/core)
 target_link_libraries(e88filter_core PUBLIC e88filter_format)
 target_compile_options(e88filter_core PRIVATE ${WARN})

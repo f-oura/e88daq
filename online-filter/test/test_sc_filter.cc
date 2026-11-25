@@ -6,6 +6,7 @@
 
 #include "Builder.hh"
 #include "Prescale.hh"
+#include "RunSettings.hh"
 #include "ScFilterRun.hh"
 #include "ScPairFilter.hh"
 
@@ -174,6 +175,27 @@ int main() {
     std::remove("t_ps2.marks.tsv");
     CHECK(!again.Begin(po, 18, "t_ps2.marks.tsv", error));  // no prescale-less setting
     std::remove("t_ps.marks.tsv");
+  }
+  {  // per-run settings file of the device
+    e88filter::RunSettings s{"sc", 100};
+    std::string error;
+    std::ofstream("t_rs.txt") << "# set from the controller\nkind prescale\nprescale 10\n";
+    CHECK(e88filter::ReadRunSettings("t_rs.txt", s, error));
+    CHECK(s.kind == "prescale");
+    CHECK_EQ(s.prescale, std::uint64_t{10});
+    std::ofstream("t_rs.txt") << "kind off\n";
+    CHECK(e88filter::ReadRunSettings("t_rs.txt", s, error));
+    CHECK(s.kind == "off");
+    CHECK_EQ(s.prescale, std::uint64_t{10});  // a missing key keeps the value
+    for (const char* bad : {"kind none\n", "prescale 0\n", "prescale 010\n", "prescale -1\n", "prescale 1.5\n",
+                            "window 50\n", "kind\n", "kind sc sc\n"}) {
+      std::ofstream("t_rs.txt") << bad;
+      e88filter::RunSettings before = s;
+      CHECK(!e88filter::ReadRunSettings("t_rs.txt", s, error));
+      CHECK(s.kind == before.kind && s.prescale == before.prescale);  // unchanged on error
+    }
+    std::remove("t_rs.txt");
+    CHECK(!e88filter::ReadRunSettings("t_rs.txt", s, error));  // missing file
   }
   std::remove("t_det.txt");
   std::remove("t_map.txt");

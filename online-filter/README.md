@@ -70,6 +70,11 @@ it otherwise, so the filter never holds up the run file; compare `received` in t
   `--e88-detector-def`, `--e88-channel-map`, `--e88-settings`), `--marks-dir` (required).
 - At every STOP it writes `<marks-dir>/runXXXXXX_sc.marks.tsv` (`_ps` for the plain prescale) and `runXXXXXX_sc.summary.json` (as the file version, plus `send_failed`).
   If the parameters cannot be read for the run, it logs the error, sends nothing and writes the error in the summary.
+- `--run-settings FILE` is read at every RUN (`core/RunSettings`): lines `kind sc|prescale|off` and `prescale N` replace the start
+  options for that run, so the filter can be changed between runs without restarting the session. `off` keeps nothing in the run.
+  A file that cannot be read is an error of that run (nothing is sent). The summary records the kind and N used (`"filter": "off"` for off).
+  `--suffix S` keeps the names `runXXXXXX_S.*` for every run whatever the kind (the side-output FileSink is started with one suffix);
+  the launcher gives the suffix of the session and `<output>/run-settings.txt`.
 
 Planned: the main line (TimeFrameBuilder → filter → FileSink, only the filtered file), after the side output has been compared with
 the full data in real runs; it needs the approval of the experiment's owner.
