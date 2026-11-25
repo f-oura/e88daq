@@ -169,7 +169,14 @@ class Sessions:
     def get_settings(self):
         path = self.settings_path()
         if path is None:
-            return {'available': False}
+            s = self.state()
+            if not s.get('running'):
+                reason = 'no session is running'
+            elif s.get('no_file'):
+                reason = 'the side-output filters do not run in a session that writes no run files'
+            else:
+                reason = 'this session runs no side-output filter (it starts with --sc-filter-prescale or --prescale-filter)'
+            return {'available': False, 'reason': reason}
         try:
             return {'available': True, **run_settings.read(path)}
         except (OSError, ValueError) as exc:

@@ -236,7 +236,7 @@
 
             </div>
 
-            <div class="card" id="filter-card" style="margin-bottom: 8px; display: none;">
+            <div class="card" id="filter-card" style="margin-bottom: 8px;">
                 <h2>Side-output filter (from the next RUN)</h2>
                 <div class="flex-row">
                     <span id="filter-current">Current: </span>
@@ -248,7 +248,7 @@
                         <option value="off">off (keep nothing)</option>
                     </select>
                     <label class="label-normal">1 of N: <input type="number" id="filter-prescale" min="1" max="1000000000" step="1"/></label>
-                    <input type="submit" value="APPLY"/>
+                    <input type="submit" id="filter-apply" value="APPLY"/>
                     <span id="filter-message"></span>
                 </form>
             </div>
@@ -466,10 +466,10 @@
                 cellN.style.fontSize = "13px";
                 obj.counts.forEach(c => {
                     const cell = row.insertCell(-1);
-                    // The counts arrive as strings ("0"): compare as numbers, so that empty states stay blank.
-                    const n = Number(c.value);
-                    cell.innerHTML = n !== 0 ? c.value : '';
-                    if (n !== 0) { const k = StateClass(c.name); if (k) cell.classList.add(k); }
+                    // Every count is shown (0 included). The counts arrive as strings ("0"): compare as numbers, so that
+                    // only the cell of the current state is coloured.
+                    cell.innerHTML = c.value;
+                    if (Number(c.value) !== 0) { const k = StateClass(c.name); if (k) cell.classList.add(k); }
                 });
                 row.insertCell(-1).innerHTML = obj.date;
             });
@@ -567,9 +567,12 @@
         }
 
         function ShowFilterSettings(j) {
-            const card = document.getElementById('filter-card');
-            if (!j || !j.available) { card.style.display = 'none'; return; }
-            card.style.display = '';
+            const kindSel = document.getElementById('filter-kind'), preIn = document.getElementById('filter-prescale');
+            const apply = document.getElementById('filter-apply');
+            const usable = !!(j && j.available && !j.error);
+            [kindSel, preIn, apply].forEach(e => { e.disabled = !usable; });
+            if (!j) { document.getElementById('filter-current').innerHTML = 'Not available: the session page cannot be reached from here.'; return; }
+            if (!j.available) { document.getElementById('filter-current').innerHTML = 'Not available: ' + (j.reason || 'no side-output filter in this session') + '.'; return; }
             document.getElementById('filter-current').innerHTML = j.error ? 'Current: ' + j.error :
                 'Current (used at the next RUN): <b>' + ({sc: 'SC coincidence + prescale', prescale: 'prescale only', off: 'off'}[j.kind] || j.kind) +
                 '</b>' + (j.kind === 'off' ? '' : ', 1 of ' + j.prescale);

@@ -86,10 +86,12 @@ class ControllerApiTests(unittest.TestCase):
 
     def test_recording_no_file(self):
         with tempfile.TemporaryDirectory() as d:
-            s, out = self.session(d, no_file=True)
+            s, out = self.session(d, no_file=True, with_settings=False)  # the launcher skips the filter
             try:
                 r = s.recording()
                 self.assertTrue(r['no_file']); self.assertNotIn('file', r)
+                g = s.get_settings()
+                self.assertFalse(g['available']); self.assertIn('writes no run files', g['reason'])
             finally:
                 s.proc.kill(); s.proc.wait()
 
@@ -106,7 +108,7 @@ class ControllerApiTests(unittest.TestCase):
             finally:
                 s.proc.kill(); s.proc.wait()
             time.sleep(0.2)
-            self.assertEqual(s.get_settings(), {'available': False})
+            self.assertEqual(s.get_settings(), {'available': False, 'reason': 'no session is running'})
             with self.assertRaises(ValueError):
                 s.set_settings('sc', 10)
 
@@ -114,7 +116,8 @@ class ControllerApiTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             s, out = self.session(d, with_settings=False)
             try:
-                self.assertEqual(s.get_settings(), {'available': False})
+                r = s.get_settings()
+                self.assertFalse(r['available']); self.assertIn('runs no side-output filter', r['reason'])
             finally:
                 s.proc.kill(); s.proc.wait()
 
