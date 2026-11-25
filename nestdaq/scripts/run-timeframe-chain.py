@@ -12,6 +12,10 @@ transitions and RUN/STOP are taken from the browser, the root HBF is switched on
 RUN (once every sampler has connected) and off before STOP by nestdaq/scripts/webctl-hook.py,
 and the session ends when every device has exited (END in the browser) or on SIGINT/SIGTERM.
 The HBF is switched off again whenever the session ends.
+--sc-filter-prescale N also runs the SC coincidence filter (online-filter/e88-sc-filter-device) on the
+"dqm" side output of the TimeFrameBuilder and writes the kept time frames with a second FileSink to
+run<NNNNNN>_sc.dat next to the run file (marks and summary beside it). The run file itself is unchanged;
+the TimeFrameBuilder skips the side output when the filter cannot take a time frame.
 """
 import argparse,json,math,os,re,shlex,signal,socket,subprocess,time,sys
 from pathlib import Path
@@ -74,6 +78,9 @@ def main():
     p.add_argument('--sender',type=Path)
     p.add_argument('--sources',nargs='+',metavar='NAME',help='data_sources keys to use, in order (default: all, in setup order)')
     p.add_argument('--webctl',metavar='ADDR:PORT',help='hand control to daq-webctl listening here (for example 127.0.0.1:8080); --seconds is ignored')
+    p.add_argument('--sc-filter-prescale',type=int,metavar='N',help='run the SC coincidence filter on the dqm output; N: unbiased prescale (keep 1 of N time frames regardless of content, N >= 1)')
+    p.add_argument('--e88-param',type=Path,help='E88 parameter index for the SC filter (required with --sc-filter-prescale)')
+    p.add_argument('--sc-filter-exe',type=Path,default=ROOT/'build/online-filter/bin/e88-sc-filter-device',help='SC filter device executable')
     a=p.parse_args()
     if not a.prefix or a.seconds<=0 or not math.isfinite(a.seconds) or a.output.exists():p.error('prefix required, seconds positive, output must be new')
     a.output=a.output.resolve();a.prefix=a.prefix.resolve()
@@ -92,6 +99,14 @@ def main():
         if data_dir.exists():p.error('replay data directory exists')
         data_dir.mkdir(parents=True)
     data_file=output_path(data_dir,a.run_number)
+    sc_filter=a.sc_filter_prescale is not None
+    if sc_filter:
+        if a.sc_filter_prescale<1:p.error('--sc-filter-prescale must be at least 1 (an unbiased prescale is always mixed in)')
+        if not a.e88_param or not a.e88_param.is_file():p.error('--sc-filter-prescale needs --e88-param <index>')
+        if not a.sc_filter_exe.is_file():p.error(f'SC filter device not built: {a.sc_filter_exe}')
+        stem=data_file.parent/f'run{a.run_number:06d}_sc'
+        for x in [stem.with_suffix('.dat'),Path(f'{stem}.marks.tsv'),Path(f'{stem}.summary.json')]:
+            if x.exists():p.error(f'refusing existing SC filter output: {x}')
     a.output.mkdir(parents=True,exist_ok=bool(a.replay and not a.data_dir))
     env=dict(os.environ);env['LD_LIBRARY_PATH']=f'{a.prefix}/lib64:{a.prefix}/lib:'+env.get('LD_LIBRARY_PATH','')
     procs={};logs={};hbf_attempted=False;hbf_off_attempted=False;report={'mode':('replay' if a.replay else 'live')+('+webctl' if a.webctl else ''),'hardware_control':'Root HBF gate' if a.set_hbfstate else 'none','setup_manifest':str(a.manifest),'hbf_events':[],'run_number':a.run_number,'data_file':str(data_file),'sources':{},'states':{},'commands':{}}
@@ -123,11 +138,12 @@ def main():
             if result.returncode or '#E' in event['output']:raise RuntimeError('HBF control failed; no blind retry')
         except Exception as exc:
             event['error']=str(exc);raise
+    started=time.time()
     with socket.socket() as sock:sock.bind(('127.0.0.1',0));port=sock.getsockname()[1]
     redisconf=a.output/'redis.conf'
     redisconf.write_text(f'bind 127.0.0.1\nport {port}\nprotected-mode yes\nsave ""\nappendonly no\ndir {a.output}\n')
     tag=str(os.getpid());inputs=[svc.replace('STF','Input') for svc in roles]
-    devices=['FileSink','TimeFrameBuilder',*roles]
+    devices=['FileSink',*(['FilterSink','ScFilter'] if sc_filter else []),'TimeFrameBuilder',*roles]
     if not a.replay:devices+=inputs
     try:
         module=a.prefix/'lib64/redis/modules/redistimeseries.so'
@@ -146,6 +162,10 @@ def main():
         # One pull socket with one distinct peer per STF source; no source cross-talk.
         endpoints=[('FileSink','in','pull','connect'),('TimeFrameBuilder','out','push','bind'),('TimeFrameBuilder','in','pull','bind')]
         links=[('TimeFrameBuilder','out','FileSink','in')]
+        if sc_filter:
+            # Side output: TimeFrameBuilder dqm -> ScFilter -> FilterSink (run<NNNNNN>_sc.dat).
+            endpoints+=[('TimeFrameBuilder','dqm','push','bind'),('ScFilter','in','pull','connect'),('ScFilter','out','push','bind'),('FilterSink','in','pull','connect')]
+            links+=[('TimeFrameBuilder','dqm','ScFilter','in'),('ScFilter','out','FilterSink','in')]
         for service in roles:
             endpoints.append((service,'out','push','connect'));links.append((service,'out','TimeFrameBuilder','in'))
             if not a.replay:
@@ -158,6 +178,10 @@ def main():
         common=['-S',f'<{a.prefix}/lib64','-P','daq_service','-P','parameter_config','--registry-uri',f'tcp://127.0.0.1:{port}/0','--parameter-config-uri',f'tcp://127.0.0.1:{port}/2','--severity','debug','--color','0']
         def command(service,exe,args):return [exe,*common,'--service-name',service,'--id',f'{service}-{tag}',*args]
         launch('FileSink',command('FileSink',a.prefix/'bin/FileSink',['--in-chan-name','in','--prefix',data_file.parent,'--run-number-format','run{:06d}','--run_number',str(a.run_number),'--ext','.dat','--openmode','create','--discard','false','--multipart','false']))
+        if sc_filter:
+            launch('FilterSink',command('FilterSink',a.prefix/'bin/FileSink',['--in-chan-name','in','--prefix',data_file.parent,'--run-number-format','run{:06d}_sc','--run_number',str(a.run_number),'--ext','.dat','--openmode','create','--discard','false','--multipart','false']))
+            launch('ScFilter',command('ScFilter',a.sc_filter_exe.resolve(),['--in-chan-name','in','--out-chan-name','out','--run_number',str(a.run_number),'--marks-dir',data_file.parent,'--prescale',str(a.sc_filter_prescale),'--e88-param',a.e88_param.resolve()]))
+            report['sc_filter']={'prescale':a.sc_filter_prescale,'e88_param':str(a.e88_param.resolve()),'executable':str(a.sc_filter_exe.resolve())}
         for group in ['TimeFrameBuilder',f'TimeFrameBuilder-{tag}']:r('HSET','parameters:'+group,'metrics-uri',f'tcp://127.0.0.1:{port}/0',db=2)
         launch('TimeFrameBuilder',command('TimeFrameBuilder',a.prefix/'bin/TimeFrameBuilder',['--in-chan-name','in','--out-chan-name','out','--buffer-timeout','2000','--buffer-depth-limit','10000','--output-incomplete-tf','true','--discard-output','false']))
         for index,(svc,role) in enumerate(roles.items()):
@@ -181,7 +205,7 @@ def main():
         for cmd,target in [('INIT DEVICE','INITIALIZED'),('BIND','BOUND'),('CONNECT','DEVICE READY'),('INIT TASK','READY')]:drive(cmd,target)
         tftext=(a.output/'TimeFrameBuilder.log').read_text(errors='replace')
         if not re.search(rf'number of source = {len(roles)}\b',tftext):raise RuntimeError(f'TimeFrameBuilder did not bind exactly {len(roles)} input peers')
-        drive('RUN','RUNNING',keys=['FileSink','TimeFrameBuilder'] if a.replay else devices)
+        drive('RUN','RUNNING',keys=['FileSink','TimeFrameBuilder',*(['FilterSink','ScFilter'] if sc_filter else [])] if a.replay else devices)
         if not a.replay:
             wait_sampler_tcp(procs, a.output, inputs)
         print(f'RUNNING: {len(roles)} STF peers -> TimeFrameBuilder -> FileSink',flush=True)
@@ -222,6 +246,14 @@ def main():
                 except subprocess.TimeoutExpired:proc.kill();proc.wait()
         for log in logs.values():log.close()
         report['final_exit_codes']={k:p.returncode for k,p in procs.items()}
+        if sc_filter:
+            # Summaries written by the filter at every STOP of this session (one per run number).
+            summaries={}
+            for f in sorted(data_file.parent.glob('run*_sc.summary.json')):
+                if f.stat().st_mtime>=started:
+                    try:summaries[f.name]=json.loads(f.read_text())
+                    except ValueError as exc:summaries[f.name]={'unreadable':str(exc)}
+            report['sc_filter_summaries']=summaries
         (a.output/'report.json').write_text(json.dumps(report,indent=2)+'\n')
 def run_webctl(a,launch,procs,logs,env,devices,inputs,setup,port,report,keep_presence):
     """Start daq-webctl with the HBF hooks and wait until the devices end or a signal arrives."""

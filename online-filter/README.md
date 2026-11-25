@@ -40,5 +40,25 @@ build/online-filter/bin/e88-sc-filter --input run000123.dat --output run000123_s
   - `OUTPUT.summary.json`: parameters used (path and SHA-256 of each file), window, prescale, and the counts
     (received, kept, `sc_pass`, `prescaled`, `prescale_only`, `malformed_kept`, SC leading edges, bytes).
 
-Planned: a FairMQ device with the same decision for the side output (dqm) of the TimeFrameBuilder, and later the
-main line (TimeFrameBuilder → filter → FileSink), which needs the approval of the experiment's owner.
+## In the DAQ chain (`e88-sc-filter-device`)
+
+The FairMQ device makes the same decision (`core/ScFilterRun`) on time frames received from a channel and sends the kept
+time frames unchanged to its output channel. It is built when FairMQ is found:
+
+```bash
+cmake -S online-filter -B build/online-filter -DCMAKE_PREFIX_PATH=<nestdaq prefix> && cmake --build build/online-filter -j
+```
+
+`nestdaq/scripts/run-timeframe-chain.py --sc-filter-prescale N --e88-param INDEX` (or `run-control/daqctl.py run` with the same
+options) connects it to the `dqm` side output of the TimeFrameBuilder, with a second FileSink writing `runXXXXXX_sc.dat` next to the
+run file; the run file is written as before. The TimeFrameBuilder sends to `dqm` only when the filter can take the time frame and skips
+it otherwise, so the filter never holds up the run file; compare `received` in the summary with the time frames of the run file.
+
+- The run number is the NestDAQ run number (property `run_number`, as for the FileSink); the parameters are read for it at every RUN.
+- Options: `--prescale N` (required), `--prescale-offset`, `--window`, `--tdc-lsb-ns`, `--sc-modules`, `--e88-param` (or
+  `--e88-detector-def`, `--e88-channel-map`, `--e88-settings`), `--marks-dir` (required).
+- At every STOP it writes `<marks-dir>/runXXXXXX_sc.marks.tsv` and `runXXXXXX_sc.summary.json` (as the file version, plus `send_failed`).
+  If the parameters cannot be read for the run, it logs the error, sends nothing and writes the error in the summary.
+
+Planned: the main line (TimeFrameBuilder → filter → FileSink, only the filtered file), after the side output has been compared with
+the full data in real runs; it needs the approval of the experiment's owner.

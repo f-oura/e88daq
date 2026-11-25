@@ -26,7 +26,7 @@ e88daq/
 ├── hul/
 │   ├── trigger/       HUL trigger parameters and register tools
 │   └── mtx/           2D matrix tables, table generation, and upload tools
-├── online-filter/     online filters: SC up/down coincidence with an unbiased prescale (file version)
+├── online-filter/     online filters: SC up/down coincidence with an unbiased prescale (file version and FairMQ device)
 ├── online-analyzer/   online analyzer (submodule, pinned)
 ├── tools/             offline checks of captured data
 ├── tests/             unit tests (no board needed)

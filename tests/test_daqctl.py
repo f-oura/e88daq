@@ -125,6 +125,17 @@ class WebctlTests(unittest.TestCase):
     def test_report_of_run_17(self):
         """Session of run 17 (2026-11-24): devices stayed IDLE, no hook, no file -> NO_DATA."""
         self.assertEqual(self.outcome('127.0.0.1:18080',hooks=[])['result'],'NO_DATA')
+    def test_sc_filter_passed_to_timeframe_chain(self):
+        with tempfile.TemporaryDirectory() as d, patch.object(m,'inspect',return_value={'linked':True,'ready':True}), patch.object(m,'read',return_value=0), patch.object(m,'capture_with_receiver_output') as capture:
+            rc=m.main(SETUP+['run','--reader','/r','--writer','/w','--set-hbfstate','/h','--run-number','42','--data-dir',d,'--out',d+'/run','--sc-filter-prescale','100','--e88-param','/p/index.txt'])
+            self.assertEqual(rc,0)
+            cmd=capture.call_args.args[4]
+            self.assertEqual(cmd[cmd.index('--sc-filter-prescale')+1],'100');self.assertEqual(cmd[cmd.index('--e88-param')+1],'/p/index.txt')
+    def test_sc_filter_needs_prescale_and_param(self):
+        for extra in (['--sc-filter-prescale','0','--e88-param','/p'],['--sc-filter-prescale','10']):
+            with tempfile.TemporaryDirectory() as d, patch.object(m,'inspect') as inspect, patch.object(m,'capture_with_receiver_output') as capture:
+                rc=m.main(SETUP+['run','--reader','/r','--writer','/w','--set-hbfstate','/h','--run-number','42','--data-dir',d,'--out',d+'/run']+extra)
+                self.assertEqual(rc,2);inspect.assert_not_called();capture.assert_not_called()
     def test_webctl_rejected_outside_timeframe_run(self):
         with tempfile.TemporaryDirectory() as d, patch.object(m,'inspect') as inspect:
             rc=m.main(SETUP+['status','--reader','/r','--out',d+'/s','--webctl','127.0.0.1:8080'])

@@ -124,6 +124,8 @@ def main(argv=None):
     ap.add_argument('--data-dir', help='TF data directory; default from setup manifest')
     ap.add_argument('--webctl', metavar='ADDR:PORT', help='timeframe run controlled from daq-webctl at this address instead of a fixed --seconds capture')
     ap.add_argument('--builder', choices=['timeframe','separate-stf'], default='timeframe', help='run output topology (default: TimeFrameBuilder over every data source)')
+    ap.add_argument('--sc-filter-prescale', type=int, metavar='N', help='timeframe run: also write run<NNNNNN>_sc.dat with the SC coincidence filter on the side output; N: unbiased prescale (>= 1)')
+    ap.add_argument('--e88-param', help='E88 parameter index for the SC filter (required with --sc-filter-prescale)')
     args = ap.parse_args(argv)
     out = pathlib.Path(args.out).resolve()
     out.mkdir(parents=True, exist_ok=False)
@@ -152,6 +154,12 @@ def main(argv=None):
             raise ValueError('run-number/data-dir options apply to timeframe mode only')
         if args.webctl and (args.action != 'run' or args.builder != 'timeframe'):
             raise ValueError('--webctl applies to the timeframe run only')
+        if args.sc_filter_prescale is not None:
+            if args.action != 'run' or args.builder != 'timeframe':
+                raise ValueError('--sc-filter-prescale applies to the timeframe run only')
+            if args.sc_filter_prescale < 1 or not args.e88_param:
+                raise ValueError('--sc-filter-prescale needs N >= 1 and --e88-param')
+            result['sc_filter'] = {'prescale': args.sc_filter_prescale, 'e88_param': args.e88_param}
         for name, board in boards.items():
             result['boards'][name] = inspect(board, args.reader, events)
         root = next(b for b in boards.values() if b['role'] == 'root')
@@ -177,6 +185,8 @@ def main(argv=None):
                 cmd = [sys.executable, str(ROOT/'nestdaq/scripts/run-timeframe-chain.py'), str(out/'timeframe'), '--live', '--seconds', str(args.seconds), '--manifest', str(pathlib.Path(args.manifest).resolve()), '--set-hbfstate', args.set_hbfstate, '--run-number',str(args.run_number),'--data-dir',str(data_file.parent)]
                 if args.webctl:
                     cmd += ['--webctl', args.webctl]
+                if args.sc_filter_prescale is not None:
+                    cmd += ['--sc-filter-prescale', str(args.sc_filter_prescale), '--e88-param', args.e88_param]
             else:
                 cmd = [sys.executable, str(ROOT/'nestdaq/scripts/run-separate-stf.py'), '--root', root['endpoint'], '--set-hbfstate', args.set_hbfstate, '--on', str(args.seconds), '--summary', str(out/'capture.json')]
                 for name, board in boards.items():

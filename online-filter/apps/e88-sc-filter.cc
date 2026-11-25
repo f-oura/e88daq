@@ -10,23 +10,15 @@
 // A time frame that cannot be parsed is kept (reason "malformed"): the filter never drops what it cannot judge.
 #include <sys/stat.h>
 
-#include <cerrno>
-#include <cstdio>
 #include <cstdlib>
-#include <cstring>
 #include <fstream>
 #include <iostream>
-#include <map>
 #include <sstream>
 #include <string>
 #include <vector>
 
-#include "Params.hh"
-#include "Prescale.hh"
-#include "ScPairFilter.hh"
+#include "ScFilterRun.hh"
 #include "format/FileReader.hh"
-#include "format/Frames.hh"
-#include "format/NestdaqHeaders.hh"
 
 namespace {
 
@@ -51,21 +43,6 @@ void Usage() {
       "  --max-frames N          stop after N time frames (the output then has no trailer)\n";
 }
 
-std::string JsonString(const std::string& s) {
-  std::string o = "\"";
-  for (char c : s) {
-    if (c == '"' || c == '\\') o += '\\';
-    if (static_cast<unsigned char>(c) < 0x20) {
-      char b[8];
-      std::snprintf(b, sizeof(b), "\\u%04x", c);
-      o += b;
-    } else {
-      o += c;
-    }
-  }
-  return o + "\"";
-}
-
 bool Exists(const std::string& path) {
   struct stat st;
   return ::stat(path.c_str(), &st) == 0;
@@ -80,11 +57,9 @@ bool ReadBlock(const std::string& path, std::uint64_t offset, std::size_t n, std
 }  // namespace
 
 int main(int argc, char** argv) {
-  std::string input, output, marksPath, summaryPath, modulesText;
-  e88filter::ParamOptions popt;
+  std::string input, output, marksPath, summaryPath;
+  e88filter::ScFilterOptions options;
   long long run = -1, maxFrames = -1;
-  unsigned long long factor = 0, offset = 0;
-  double window = -1, lsb = -1;
   bool havePrescale = false;
   for (int i = 1; i < argc; ++i) {
     const std::string a = argv[i];
@@ -97,17 +72,20 @@ int main(int argc, char** argv) {
     };
     if (a == "--input") input = value();
     else if (a == "--output") output = value();
-    else if (a == "--prescale") { factor = std::stoull(value()); havePrescale = true; }
-    else if (a == "--prescale-offset") offset = std::stoull(value());
-    else if (a == "--param") popt.index = value();
-    else if (a == "--detector-def") popt.detectorDef = value();
-    else if (a == "--channel-map") popt.channelMap = value();
-    else if (a == "--settings") popt.settings = value();
-    else if (a == "--allow-unassigned") popt.allowUnassigned = true;
+    else if (a == "--prescale") { options.prescale = std::stoull(value()); havePrescale = true; }
+    else if (a == "--prescale-offset") options.prescaleOffset = std::stoull(value());
+    else if (a == "--param") options.param.index = value();
+    else if (a == "--detector-def") options.param.detectorDef = value();
+    else if (a == "--channel-map") options.param.channelMap = value();
+    else if (a == "--settings") options.param.settings = value();
+    else if (a == "--allow-unassigned") options.param.allowUnassigned = true;
     else if (a == "--run") run = std::stoll(value());
-    else if (a == "--window") window = std::stod(value());
-    else if (a == "--tdc-lsb-ns") lsb = std::stod(value());
-    else if (a == "--sc-modules") modulesText = value();
+    else if (a == "--window") options.windowNs = std::stod(value());
+    else if (a == "--tdc-lsb-ns") options.tdcLsbNs = std::stod(value());
+    else if (a == "--sc-modules") {
+      std::stringstream ss(value());
+      for (std::string m; std::getline(ss, m, ',');) options.modules.push_back(std::stoi(m));
+    }
     else if (a == "--marks") marksPath = value();
     else if (a == "--summary") summaryPath = value();
     else if (a == "--max-frames") maxFrames = std::stoll(value());
@@ -127,52 +105,31 @@ int main(int argc, char** argv) {
       return 2;
     }
   }
-  std::string error;
-  e88filter::Prescale prescale;
-  if (!prescale.Configure(factor, offset, error)) {
-    std::cerr << "e88-sc-filter: " << error << "\n";
-    return 2;
-  }
 
+  std::string error;
   nda::format::FileReader reader;
   if (!reader.Open(input, error)) {
     std::cerr << "e88-sc-filter: " << error << "\n";
     return 1;
   }
   const auto& info = reader.Info();
-  const std::uint64_t runNumber = run >= 0 ? static_cast<std::uint64_t>(run) : info.runNumber;
   if (run < 0 && !info.hasFileSinkHeader) {
     std::cerr << "e88-sc-filter: the input has no FileSink header; give --run\n";
     return 2;
   }
-  e88filter::Parameters params;
-  if (!e88filter::LoadParameters(popt, runNumber, params, error)) {
+  const std::uint64_t runNumber = run >= 0 ? static_cast<std::uint64_t>(run) : info.runNumber;
+  e88filter::ScFilterRun filter;
+  if (!filter.Begin(options, runNumber, marksPath, error)) {
     std::cerr << "e88-sc-filter: " << error << "\n";
     return 2;
   }
-  for (const auto& w : params.warnings) std::cerr << "e88-sc-filter: warning: " << w << "\n";
-
-  e88filter::ScPairConfig config;
-  config.windowNs = window > 0 ? window : params.settings.Number("sc_pair_window", 0, -1);
-  config.tdcLsbNs = lsb > 0 ? lsb : params.settings.Number("tdc_lsb_ns", 0, -1);
-  config.b2ttDataType = static_cast<int>(params.settings.Integer("b2tt_data_type", 0, -1));
-  if (!modulesText.empty()) {
-    std::stringstream ss(modulesText);
-    for (std::string m; std::getline(ss, m, ',');) config.modules.push_back(std::stoi(m));
-  }
-  e88filter::ScPairFilter filter;
-  if (!filter.Configure(params.detectors, params.channels, config, error)) {
-    std::cerr << "e88-sc-filter: " << error << " (window and LSB come from --window / --tdc-lsb-ns or the settings)\n";
-    return 2;
-  }
+  for (const auto& w : filter.Params().warnings) std::cerr << "e88-sc-filter: warning: " << w << "\n";
 
   std::ofstream out(output, std::ios::binary);
-  std::ofstream marks(marksPath);
-  if (!out || !marks) {
-    std::cerr << "e88-sc-filter: cannot create " << output << " or " << marksPath << "\n";
+  if (!out) {
+    std::cerr << "e88-sc-filter: cannot create " << output << "\n";
     return 1;
   }
-  marks << "# input_index\ttime_frame_id\toutput_index\treasons\tsc_counters\tfirst_module\tfirst_segment\n";
   constexpr std::size_t kBlock = 304;  // FileSink header and trailer
   if (info.hasFileSinkHeader) {
     std::vector<char> header;
@@ -182,14 +139,9 @@ int main(int argc, char** argv) {
     }
     out.write(header.data(), static_cast<std::streamsize>(header.size()));
   }
-
-  std::uint64_t received = 0, kept = 0, scPass = 0, prescaled = 0, prescaleOnly = 0, malformed = 0;
-  std::uint64_t bytesIn = 0, bytesOut = 0, leading = 0;
-  std::map<int, std::uint64_t> passByModule;  // first counter's module
   std::vector<std::uint64_t> buffer;
-  nda::format::TimeFrameView view;
   bool complete = false;
-  while (maxFrames < 0 || static_cast<long long>(received) < maxFrames) {
+  while (maxFrames < 0 || static_cast<long long>(filter.Counts().received) < maxFrames) {
     std::size_t size = 0;
     const auto status = reader.Next(buffer, size, error);
     if (status == nda::format::FileReader::Status::kEnd) {
@@ -200,34 +152,8 @@ int main(int argc, char** argv) {
       std::cerr << "e88-sc-filter: " << error << "\n";
       return 1;
     }
-    const std::uint64_t index = received++;
-    bytesIn += size;
-    const auto* header = reinterpret_cast<const ::TimeFrame::Header*>(buffer.data());
-    std::string reasons;
-    e88filter::ScPairResult r;
-    if (!nda::format::ParseTimeFrame(reinterpret_cast<const std::uint8_t*>(buffer.data()), size, view, error)) {
-      ++malformed;
-      reasons = "malformed";
-    } else {
-      r = filter.Judge(view);
-      leading += r.leading;
-      if (r.pass) {
-        ++scPass;
-        ++passByModule[r.module];
-        reasons = "sc";
-      }
-    }
-    if (prescale.Select(index)) {
-      ++prescaled;
-      if (reasons.empty()) ++prescaleOnly;
-      reasons += reasons.empty() ? "prescale" : ",prescale";
-    }
-    if (reasons.empty()) continue;
-    out.write(reinterpret_cast<const char*>(buffer.data()), static_cast<std::streamsize>(size));
-    bytesOut += size;
-    marks << index << '\t' << header->timeFrameId << '\t' << kept << '\t' << reasons << '\t' << r.counters << '\t'
-          << r.module << '\t' << r.segment << '\n';
-    ++kept;
+    if (filter.Process(reinterpret_cast<const std::uint8_t*>(buffer.data()), size))
+      out.write(reinterpret_cast<const char*>(buffer.data()), static_cast<std::streamsize>(size));
   }
   if (complete && info.hasFileSinkTrailer) {
     std::vector<char> trailer;
@@ -238,34 +164,14 @@ int main(int argc, char** argv) {
     out.write(trailer.data(), static_cast<std::streamsize>(trailer.size()));
   }
   out.close();
-  marks.close();
-  if (!out || !marks) {
-    std::cerr << "e88-sc-filter: write error\n";
+  if (!out) {
+    std::cerr << "e88-sc-filter: write error on " << output << "\n";
     return 1;
   }
-
-  std::ostringstream js;
-  js << "{\n  \"filter\": \"sc_pair\",\n  \"input\": " << JsonString(input) << ",\n  \"output\": " << JsonString(output)
-     << ",\n  \"marks\": " << JsonString(marksPath) << ",\n  \"run_number\": " << runNumber
-     << ",\n  \"run_series\": " << JsonString(params.runSeries) << ",\n  \"parameters\": [";
-  for (std::size_t i = 0; i < params.files.size(); ++i)
-    js << (i ? ", " : "") << "{\"kind\": " << JsonString(params.files[i].first) << ", \"path\": "
-       << JsonString(params.files[i].second) << ", \"sha256\": " << JsonString(params.sha256[i]) << "}";
-  js << "],\n  \"window_ns\": " << config.windowNs << ",\n  \"tdc_lsb_ns\": " << config.tdcLsbNs
-     << ",\n  \"b2tt_data_type\": " << config.b2ttDataType << ",\n  \"sc_counters\": " << filter.Counters().size()
-     << ",\n  \"sc_channels\": " << filter.ChannelsUsed() << ",\n  \"prescale_factor\": " << prescale.Factor()
-     << ",\n  \"prescale_offset\": " << prescale.Offset() << ",\n  \"complete\": " << (complete ? "true" : "false")
-     << ",\n  \"received\": " << received << ",\n  \"kept\": " << kept << ",\n  \"sc_pass\": " << scPass
-     << ",\n  \"sc_pass_by_first_module\": {";
-  bool first = true;
-  for (const auto& [m, n] : passByModule) {
-    js << (first ? "" : ", ") << "\"" << m << "\": " << n;
-    first = false;
-  }
-  js << "},\n  \"prescaled\": " << prescaled << ",\n  \"prescale_only\": " << prescaleOnly
-     << ",\n  \"malformed_kept\": " << malformed << ",\n  \"sc_leading_edges\": " << leading
-     << ",\n  \"bytes_in\": " << bytesIn << ",\n  \"bytes_out\": " << bytesOut << "\n}\n";
-  std::ofstream(summaryPath) << js.str();
-  std::cout << js.str();
+  const std::string summary = filter.End({{"input", e88filter::JsonString(input)},
+                                          {"output", e88filter::JsonString(output)},
+                                          {"complete", complete ? "true" : "false"}});
+  std::ofstream(summaryPath) << summary;
+  std::cout << summary;
   return 0;
 }
