@@ -84,6 +84,32 @@ def capture_with_receiver_output(reader, writer, receiver_ip, root_ip, command, 
             raise RuntimeError('Receiver control restoration mismatch; stop without retry')
 
 
+def capture_outcome(out, data_file, webctl):
+    """Result of a timeframe run from what it left behind, not only from the process exit codes.
+
+    The data file of the run number given at the start and the RUN hooks of the web controller tell whether
+    data can exist: a session ended without any RUN, or a fixed capture that wrote no file, has no data.
+    """
+    info = {'data_file_exists': data_file.exists()}
+    if info['data_file_exists']:
+        info['data_file_bytes'] = data_file.stat().st_size
+    if webctl:
+        # The hooks append to hooks.jsonl at every RUN/STOP; read it directly, since the chain report lacks the
+        # hooks when the chain itself ended with an error.
+        path = out / 'timeframe' / 'hooks.jsonl'
+        hooks = [json.loads(x) for x in path.read_text().splitlines() if x.strip()] if path.exists() else []
+        info['runs_started'] = sum(1 for h in hooks if h.get('event') == 'post-run' and h.get('status') == 'OK')
+    if info['data_file_exists'] and info['data_file_bytes'] > 0:
+        info['result'] = 'CAPTURE_COMPLETED_REQUIRES_DECODE'
+    elif webctl and info['runs_started'] > 0:
+        # RUN was pressed; the run number may have been changed in the page, so the data is under another name.
+        info['result'] = 'CAPTURE_COMPLETED_REQUIRES_DECODE'
+        info['note'] = 'no data file for the starting run number; the run number was changed in the web controller?'
+    else:
+        info['result'] = 'NO_DATA'
+    return info
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('action', choices=['status', 'prepare', 'run'])
@@ -167,7 +193,12 @@ def main(argv=None):
                 result['root_hbf_post'] = read(args.reader, root['endpoint'], 0x00b00000, 1, events)
             if result['root_hbf_post'] != 0:
                 raise RuntimeError('Root HBF was not restored off')
-        result['result'] = 'READY' if args.action != 'run' else 'CAPTURE_COMPLETED_REQUIRES_DECODE'
+        if args.action != 'run':
+            result['result'] = 'READY'
+        elif args.builder == 'timeframe':
+            result.update(capture_outcome(out, data_file, args.webctl))
+        else:
+            result['result'] = 'CAPTURE_COMPLETED_REQUIRES_DECODE'
     except Exception as exc:
         result['error'] = str(exc)
     finally:

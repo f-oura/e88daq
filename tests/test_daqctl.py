@@ -100,6 +100,31 @@ class WebctlTests(unittest.TestCase):
             self.assertEqual(rc,0)
             cmd=capture.call_args.args[4]
             self.assertEqual(cmd[cmd.index('--webctl')+1],'127.0.0.1:8080')
+    def outcome(self, webctl, hooks=None, data=b''):
+        with tempfile.TemporaryDirectory() as d:
+            out=pathlib.Path(d)/'run';(out/'timeframe').mkdir(parents=True)
+            if hooks:(out/'timeframe'/'hooks.jsonl').write_text(''.join(m.json.dumps(h)+'\n' for h in hooks))
+            data_file=pathlib.Path(d)/'run000042.dat'
+            if data:data_file.write_bytes(data)
+            return m.capture_outcome(out,data_file,webctl)
+    def test_session_without_run_has_no_data(self):
+        r=self.outcome('127.0.0.1:8080',hooks=[])
+        self.assertEqual(r['result'],'NO_DATA');self.assertEqual(r['runs_started'],0);self.assertFalse(r['data_file_exists'])
+    def test_failed_run_hook_does_not_count(self):
+        r=self.outcome('127.0.0.1:8080',hooks=[{'event':'pre-run','status':'OK'},{'event':'post-run','status':'FAILED'}])
+        self.assertEqual(r['result'],'NO_DATA')
+    def test_data_file_means_capture(self):
+        r=self.outcome('127.0.0.1:8080',hooks=[{'event':'post-run','status':'OK'}],data=b'x'*16)
+        self.assertEqual(r['result'],'CAPTURE_COMPLETED_REQUIRES_DECODE');self.assertEqual(r['data_file_bytes'],16)
+    def test_run_under_another_number_is_noted(self):
+        r=self.outcome('127.0.0.1:8080',hooks=[{'event':'post-run','status':'OK'}]*2)
+        self.assertEqual(r['result'],'CAPTURE_COMPLETED_REQUIRES_DECODE');self.assertEqual(r['runs_started'],2);self.assertIn('note',r)
+    def test_fixed_capture_without_file_has_no_data(self):
+        self.assertEqual(self.outcome(None)['result'],'NO_DATA')
+        self.assertEqual(self.outcome(None,data=b'x')['result'],'CAPTURE_COMPLETED_REQUIRES_DECODE')
+    def test_report_of_run_17(self):
+        """Session of run 17 (2026-11-24): devices stayed IDLE, no hook, no file -> NO_DATA."""
+        self.assertEqual(self.outcome('127.0.0.1:18080',hooks=[])['result'],'NO_DATA')
     def test_webctl_rejected_outside_timeframe_run(self):
         with tempfile.TemporaryDirectory() as d, patch.object(m,'inspect') as inspect:
             rc=m.main(SETUP+['status','--reader','/r','--out',d+'/s','--webctl','127.0.0.1:8080'])

@@ -37,6 +37,10 @@ run-control/daqctl.py run     --reader "$READER" --writer "$WRITER" --set-hbfsta
 - `<new-dir>` must not exist. `report.json` there records the result, every command, and every response.
 - Any unexpected response stops the action. Nothing is retried, reset, or repaired automatically.
 
-`CAPTURE_COMPLETED_REQUIRES_DECODE` means the processes ended normally; check the data with `../tools/` before trusting it.
+`CAPTURE_COMPLETED_REQUIRES_DECODE` means the processes ended normally and data can exist: the data file of the run number is
+there, or (with `--webctl`) RUN was pressed at least once (`runs_started`; if the run number was changed in the page, the file
+has another name and `note` says so). Check the data with `../tools/` before trusting it. `NO_DATA` means the session ended
+without data: no RUN was pressed in the web controller, or a fixed capture wrote no file. `data_file_exists` and
+`data_file_bytes` are recorded in both cases.
 
 Planned: run list entries (YAML) per run, configuration snapshots with SHA-256, and run start/stop records.

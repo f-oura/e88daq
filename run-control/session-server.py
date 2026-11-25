@@ -83,7 +83,7 @@ class Sessions:
             report = Path(info['out']) / 'report.json'
             if report.exists():
                 r = json.loads(report.read_text())
-                info['report'] = {k: r.get(k) for k in ('result', 'error', 'root_hbf_post', 'run_number', 'data_file')}
+                info['report'] = {k: r.get(k) for k in ('result', 'error', 'root_hbf_post', 'run_number', 'data_file', 'runs_started', 'note')}
                 self.current.write_text(json.dumps(info))
         info['running'] = alive
         info['controller_up'] = alive and listening(self.env['SESSION_WEBCTL'])
@@ -164,10 +164,12 @@ def render(sessions, message=''):
         last = ''
         if s.get('report'):
             r = s['report']
-            cls = 'bad' if r.get('result') == 'FAIL_STOP' else 'ok'
+            cls = 'bad' if r.get('result') in ('FAIL_STOP', 'NO_DATA') else 'ok'
             last = (f'<div class="box"><b>Last session</b> (run {s.get("run_number")}): '
                     f'<span class="{cls}">{esc(str(r.get("result")))}</span>'
                     f'{"<br>" + esc(str(r.get("error"))) if r.get("error") else ""}'
+                    f'{"<br>" + esc(str(r.get("note"))) if r.get("note") else ""}'
+                    f'{"<br>RUN pressed: " + esc(str(r.get("runs_started"))) if r.get("runs_started") is not None else ""}'
                     f'<br>Root HBF after the session: {esc(str(r.get("root_hbf_post")))}'
                     f'<br><span class="muted">{esc(s.get("out", ""))}</span></div>')
         elif s.get('ended'):
