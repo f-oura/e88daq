@@ -22,11 +22,12 @@ run<NNNNNN>_ps.dat. One side-output filter per session.
 histograms there (THttpServer / JSROOT). It reads the file only, so it cannot slow the DAQ down; a new run file (a new
 run number at RUN) gets a new analyzer, and the last one keeps serving until the next run or the end of the session.
 --no-file writes no run file: no FileSink is started and the TimeFrameBuilder discards every time frame it cannot send
-(--discard-output true; it logs one error line per time frame). Side-output filters are skipped (they write files).
+(--discard-output true). Its error line for every discarded time frame is counted and left out of TimeFrameBuilder.log
+(one summary line per minute instead). Side-output filters are skipped (they write files).
 With --analyzer-http the online analyzer then reads the "dqm" side output of the TimeFrameBuilder directly
 (nda-online-monitor, best effort: the TimeFrameBuilder sends only when the analyzer can take a time frame).
 """
-import argparse,json,math,os,re,shlex,signal,socket,subprocess,time,sys
+import argparse,json,math,os,re,shlex,signal,socket,subprocess,threading,time,sys
 from pathlib import Path
 import yaml
 ROOT=Path(__file__).resolve().parents[2]
@@ -40,6 +41,36 @@ def service_base(name):
     parts=[x for x in re.split(r'[^A-Za-z0-9]+',name) if x]
     if not parts:raise ValueError(f'unusable data source name: {name!r}')
     return ''.join(x[0].upper()+x[1:] for x in parts)
+
+
+DISCARD_LINE='Discarding data'  # TimeFrameBuilder --discard-output: one error line per time frame it could not send
+
+
+def relay_log(stream, log, drop, counts, period=60, clock=time.monotonic):
+    """Copy a device's output to its log, leaving out the lines that contain `drop`.
+
+    The dropped lines are counted (counts['dropped']) and summarised once per `period` seconds. The pipe is read
+    until EOF whatever happens to the log, so the device can never block on a full pipe.
+    """
+    last=clock();since=0
+    for raw in iter(stream.readline,b''):
+        try:
+            line=raw.decode(errors='replace')
+            if drop in line:
+                counts['dropped']+=1;since+=1
+            else:
+                log.write(line)
+            if since and clock()-last>=period:
+                log.write(f"[launcher] {since} lines with '{drop}' left out in the last {clock()-last:.0f} s (total {counts['dropped']})\n")
+                last=clock();since=0
+            log.flush()
+        except Exception as exc:  # a full disk or a closed log must not stop the reading
+            counts['errors']=counts.get('errors',0)+1;counts['last_error']=str(exc)
+    try:
+        if since:log.write(f"[launcher] {since} lines with '{drop}' left out (total {counts['dropped']})\n")
+        log.flush()
+    except Exception as exc:
+        counts['last_error']=str(exc)
 
 
 def select_sources(setup, names=None):
@@ -139,9 +170,17 @@ def main():
     env=dict(os.environ);env['LD_LIBRARY_PATH']=f'{a.prefix}/lib64:{a.prefix}/lib:'+env.get('LD_LIBRARY_PATH','')
     procs={};logs={};hbf_attempted=False;hbf_off_attempted=False;report={'mode':('replay' if a.replay else 'live')+('+webctl' if a.webctl else ''),'hardware_control':'Root HBF gate' if a.set_hbfstate else 'none','setup_manifest':str(a.manifest),'hbf_events':[],'run_number':a.run_number,'data_file':None if a.no_file else str(data_file),'no_file':a.no_file,'sources':{},'states':{},'commands':{}}
     if skipped_filter:report['side_filter_skipped']=f'{skipped_filter}: not run with --no-file'
-    def launch(key,command):
+    relays={}
+    def launch(key,command,drop=None):
         logs[key]=open(a.output/f'{key}.log','w')
-        procs[key]=subprocess.Popen([str(x) for x in command],stdout=logs[key],stderr=subprocess.STDOUT,env=env,cwd=ROOT)
+        if drop is None:
+            procs[key]=subprocess.Popen([str(x) for x in command],stdout=logs[key],stderr=subprocess.STDOUT,env=env,cwd=ROOT)
+        else:
+            procs[key]=subprocess.Popen([str(x) for x in command],stdout=subprocess.PIPE,stderr=subprocess.STDOUT,env=env,cwd=ROOT)
+            counts={'pattern':drop,'dropped':0}
+            report.setdefault('log_lines_left_out',{})[key]=counts
+            relays[key]=threading.Thread(target=relay_log,args=(procs[key].stdout,logs[key],drop,counts),daemon=True)
+            relays[key].start()
         report['commands'][key]=[str(x) for x in command]
     def r(*args,db=0):
         return subprocess.check_output([str(a.prefix/'bin/redis-cli'),'-h','127.0.0.1','-p',str(port),'-n',str(db),*map(str,args)],text=True,stderr=subprocess.DEVNULL).strip()
@@ -241,7 +280,7 @@ def main():
             if a.e88_param:margs+=['--e88-param',a.e88_param.resolve()]
             launch('OnlineMonitor',command('OnlineMonitor',a.monitor_exe.resolve(),margs))
         for group in ['TimeFrameBuilder',f'TimeFrameBuilder-{tag}']:r('HSET','parameters:'+group,'metrics-uri',f'tcp://127.0.0.1:{port}/0',db=2)
-        launch('TimeFrameBuilder',command('TimeFrameBuilder',a.prefix/'bin/TimeFrameBuilder',['--in-chan-name','in','--out-chan-name','out','--buffer-timeout','2000','--buffer-depth-limit','10000','--output-incomplete-tf','true','--discard-output','true' if a.no_file else 'false']))
+        launch('TimeFrameBuilder',command('TimeFrameBuilder',a.prefix/'bin/TimeFrameBuilder',['--in-chan-name','in','--out-chan-name','out','--buffer-timeout','2000','--buffer-depth-limit','10000','--output-incomplete-tf','true','--discard-output','true' if a.no_file else 'false']),drop=DISCARD_LINE if a.no_file else None)
         for index,(svc,role) in enumerate(roles.items()):
             b=setup['data_sources'][role];report['sources'][svc]={'endpoint':b['endpoint'],'serial':b['serial'],'tdc_type':b['tdc_type_label']}
             if a.replay:
@@ -315,6 +354,7 @@ def main():
                 proc.terminate()
                 try:proc.wait(timeout=5)
                 except subprocess.TimeoutExpired:proc.kill();proc.wait()
+        for relay in relays.values():relay.join(timeout=10)
         for log in logs.values():log.close()
         report['final_exit_codes']={k:p.returncode for k,p in procs.items()}
         if sc_filter:

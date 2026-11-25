@@ -58,7 +58,9 @@ Normally these are started by `run-control/daqctl.py`, not by hand.
     A failing analyzer or a port in use is recorded in `online_analyzer` of `report.json` and never stops the run.
     The analyzer does not answer HTTP while it waits for new data (before the first time frame of a run, in pauses, after STOP).
   - `--no-file` starts no FileSink, so no run file is written; the TimeFrameBuilder runs with `--discard-output true` and
-    discards the time frames (it logs one error line per time frame, about 0.1 kB). Side-output filters are skipped (recorded as
+    discards the time frames. Its error line for every discarded time frame (about 0.1 kB, some 0.7 GB per hour) is left out of
+    `TimeFrameBuilder.log`: the launcher counts these lines, writes one summary line per minute, and records the total in
+    `log_lines_left_out` of `report.json`. Side-output filters are skipped (recorded as
     `side_filter_skipped`). With `--analyzer-http`, `nda-online-monitor` reads the `dqm` side output instead of a file: the
     TimeFrameBuilder sends to it only when it can take a time frame, so it never holds the DAQ back. The device takes its run number
     when it starts (the session's first run number), answers HTTP only while RUNNING, and may fail without stopping the session.
