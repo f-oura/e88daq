@@ -1,0 +1,43 @@
+cmake_minimum_required(VERSION 3.16)
+project(E88OnlineFilter CXX)
+
+# Online filters of the E88 DAQ. The data format and the E88 parameter readers come from the online analyzer
+# (../online-analyzer, a submodule), compiled here without ROOT and FairMQ.
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+  set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "Build type" FORCE)
+endif()
+set(E88_ONLINE_ANALYZER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../online-analyzer" CACHE PATH "online analyzer source")
+set(NESTDAQ_USER_IMPL_DIR "${E88_ONLINE_ANALYZER_DIR}/external/nestdaq-user-impl" CACHE PATH "nestdaq-user-impl headers")
+if(NOT EXISTS "${E88_ONLINE_ANALYZER_DIR}/core/format/Frames.hh" OR NOT EXISTS "${NESTDAQ_USER_IMPL_DIR}/TimeFrameHeader.h")
+  message(FATAL_ERROR "online analyzer or nestdaq-user-impl not found; run 'git submodule update --init --recursive online-analyzer'")
+endif()
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+set(WARN -Wall -Wextra)
+
+add_library(e88filter_format STATIC
+  ${E88_ONLINE_ANALYZER_DIR}/core/format/Frames.cc
+  ${E88_ONLINE_ANALYZER_DIR}/core/format/FileReader.cc
+  ${E88_ONLINE_ANALYZER_DIR}/core/util/Sha256.cc
+  ${E88_ONLINE_ANALYZER_DIR}/experiments/e88/Params.cc
+)
+target_include_directories(e88filter_format PUBLIC ${E88_ONLINE_ANALYZER_DIR}/core ${E88_ONLINE_ANALYZER_DIR}/experiments)
+target_include_directories(e88filter_format SYSTEM PUBLIC ${NESTDAQ_USER_IMPL_DIR})
+
+add_library(e88filter_core STATIC core/ScPairFilter.cc core/Params.cc)
+target_include_directories(e88filter_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/core)
+target_link_libraries(e88filter_core PUBLIC e88filter_format)
+target_compile_options(e88filter_core PRIVATE ${WARN})
+
+add_executable(e88-sc-filter apps/e88-sc-filter.cc)
+target_link_libraries(e88-sc-filter PRIVATE e88filter_core)
+target_compile_options(e88-sc-filter PRIVATE ${WARN})
+install(TARGETS e88-sc-filter RUNTIME DESTINATION bin)
+
+enable_testing()
+add_executable(test_sc_filter test/test_sc_filter.cc)
+target_include_directories(test_sc_filter PRIVATE ${E88_ONLINE_ANALYZER_DIR}/test)
+target_link_libraries(test_sc_filter PRIVATE e88filter_core)
+target_compile_options(test_sc_filter PRIVATE ${WARN})
+add_test(NAME test_sc_filter COMMAND test_sc_filter WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
