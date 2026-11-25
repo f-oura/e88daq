@@ -139,11 +139,26 @@ class FollowerTests(unittest.TestCase):
         self.assertEqual(self.spawned, [])
 
 
+    def test_restart_button_starts_the_same_run_again(self):
+        f = self.follower()
+        self.write_run(18)
+        f.poll(18)
+        self.spawned[0].returncode = m.RESTART_STATUS
+        f.poll(18)
+        self.assertEqual(len(self.spawned), 2)
+        self.assertEqual(self.spawned[1].command, self.spawned[0].command)  # same file, parameters kept
+        self.assertEqual(f.records[0]['stopped'], 'restart requested from the page')
+        self.assertEqual(f.records[1]['note'], 'restarted from the analyzer page')
+        self.spawned[1].returncode = m.RESTART_STATUS  # may be pressed again
+        f.poll(18)
+        self.assertEqual(len(self.spawned), 3)
+
+
 class HelperTests(unittest.TestCase):
     def test_command(self):
         c = m.analyzer_command('/x/nda-replay', '/d/run000018.dat', '127.0.0.1:18090', '/p/index.txt', ['192.0.2.30', '192.0.2.31'])
         self.assertEqual(c[:2], ['/x/nda-replay', '--input'])
-        for flag in ('--follow', '--keep-alive'):
+        for flag in ('--follow', '--keep-alive', '--allow-restart'):
             self.assertIn(flag, c)
         self.assertEqual(c[c.index('--http') + 1], 'http:127.0.0.1:18090')
         self.assertEqual(c[c.index('--param') + 1], '/p/index.txt')

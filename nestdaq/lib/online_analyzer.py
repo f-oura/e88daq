@@ -5,7 +5,8 @@ never connects to the DAQ chain and cannot slow it down. When a new run file app
 at every RUN in the web controller), the analyzer of the previous run is stopped and a new one follows the new
 file. The last analyzer keeps serving its histograms (--keep-alive) until the next run starts or the session ends.
 
-A failing analyzer never stops the session: problems are only recorded.
+A failing analyzer never stops the session: problems are only recorded. The analyzer page has a Restart button;
+the analyzer then exits with RESTART_STATUS and is started again on the same run file (read from its beginning).
 """
 import socket
 import subprocess
@@ -13,6 +14,9 @@ import time
 from pathlib import Path
 
 from run_storage import run_filename
+
+# Exit status of nda-replay after the Restart button of its page (--allow-restart).
+RESTART_STATUS = 75
 
 
 def port_free(address):
@@ -36,7 +40,8 @@ def parse_http(address):
 
 
 def analyzer_command(exe, data_file, http, param=None, expect_fem=(), extra=()):
-    command = [str(exe), '--input', str(data_file), '--follow', '--keep-alive', '--quiet', '--http', f'http:{http}']
+    command = [str(exe), '--input', str(data_file), '--follow', '--keep-alive', '--allow-restart', '--quiet',
+               '--http', f'http:{http}']
     if param:
         command += ['--param', str(param)]
     if expect_fem:
@@ -105,6 +110,11 @@ class RunFileFollower:
     def poll(self, run_number):
         """Call regularly with the current run number (None when unknown)."""
         cur = self.current
+        if cur is not None and cur['proc'].poll() is not None and cur['proc'].returncode == RESTART_STATUS:
+            # Restart button of the analyzer page: the same run file again, with the same parameters.
+            self._stop_current('restart requested from the page')
+            self._start(cur['run'], cur['file'], cur['param'], note='restarted from the analyzer page')
+            return
         if cur is not None and cur['proc'].poll() is not None:
             # An analyzer that fails soon after starting with parameters is retried once without them, so the
             # DAQ health and channel histograms are still shown.

@@ -64,7 +64,9 @@ Normally these are started by `run-control/daqctl.py`, not by hand.
     cannot slow the DAQ down. A new run file (a new run number at RUN) gets a new analyzer; the last one keeps serving until the
     next run or the end of the session. If it fails with the E88 parameters (`--e88-param`), it is restarted once without them.
     A failing analyzer or a port in use is recorded in `online_analyzer` of `report.json` and never stops the run.
-    The analyzer does not answer HTTP while it waits for new data (before the first time frame of a run, in pauses, after STOP).
+    The page refreshes the displayed histograms every few seconds (Monitoring) and has two buttons at the top: Reset clears the
+    histograms and counters, which then fill again from the next time frame, and Restart starts the analyzer again on the same run
+    file from its beginning (the page is unavailable for a few seconds; recorded in `online_analyzer` of `report.json`).
   - `--no-file` starts no FileSink, so no run file is written; the TimeFrameBuilder runs with `--discard-output true` and
     discards the time frames. Its error line for every discarded time frame (about 0.1 kB, some 0.7 GB per hour) is left out of
     `TimeFrameBuilder.log`: the launcher counts these lines, writes one summary line per minute, and records the total in
@@ -72,6 +74,7 @@ Normally these are started by `run-control/daqctl.py`, not by hand.
     `side_filter_skipped`). With `--analyzer-http`, `nda-online-monitor` reads the `dqm` side output instead of a file: the
     TimeFrameBuilder sends to it only when it can take a time frame, so it never holds the DAQ back. The device takes its run number
     when it starts (the session's first run number), answers HTTP only while RUNNING, and may fail without stopping the session.
+    Its page has only the Reset button: the device is part of the chain and is not restarted from the page.
   - Every invocation starts its own Redis on 127.0.0.1 (with the RedisTimeSeries module that TimeFrameBuilder needs for metrics)
     and stops only the processes it started.
 - `scripts/run-board-chain.sh` — one board: `AmQStrTdcSampler` → `STFBuilder` → `FileSink`.
