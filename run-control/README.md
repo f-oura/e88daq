@@ -42,8 +42,9 @@ run-control/daqctl.py run     --reader "$READER" --writer "$WRITER" --set-hbfsta
   output, best effort: time frames the analyzer cannot take in time are skipped for it). The result is `NO_FILE`.
 - `session-server.py` serves a small page (loopback only, behind the password-protected proxy of the experiment portal) that
   starts such a `--webctl` session with an explicit run number and shows the result of the last one. A checkbox starts the
-  session with `--no-file`. For the running session it also answers `run-settings.json` / `run-settings` (the side-output filter
-  for the next RUN; changes are logged in `run-settings.jsonl` of the session directory). Before starting it checks that no session or other board-touching process is running and that the
+  session with `--no-file`. For the controller page of the running session it also answers `recording.json` (whether the session
+  saves data, and the newest run file and its size) and `run-settings.json` / `run-settings` (the side-output filter for the next RUN;
+  changes are logged in `run-settings.jsonl` of the session directory). Before starting it checks that no session or other board-touching process is running and that the
   run file does not exist. The command it runs is set in `config/local/session.env` (template: `config/session.env.example`).
 - The run number is given explicitly; the data file is `runXXXXXX.dat` (six digits) in the storage directory, and an existing file is never overwritten.
 - `<new-dir>` must not exist. `report.json` there records the result, every command, and every response.

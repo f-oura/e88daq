@@ -46,7 +46,11 @@ Normally these are started by `run-control/daqctl.py`, not by hand.
     the filter reads `run-settings.txt` in the output directory at every RUN (written at the start, replaced by the session page),
     the file names keep the suffix of the session, and the summary of each run records the kind and N used.
   - `--webctl ADDR:PORT` starts `daq-webctl` (the NestDAQ web controller) at that address and leaves the state transitions,
-    RUN, STOP, the run number, and END to the browser (`http://ADDR:PORT/daq-webctl.html`). `scripts/webctl-hook.py` runs around
+    RUN, STOP, the run number, and END to the browser (`http://ADDR:PORT/daq-webctl.html`). The page is `webctl/daq-webctl.html` of this
+    directory (given with `--doc-root`; based on the NestDAQ page, MIT License in `webctl/LICENSE-nestdaq`): it colours the cell of the
+    current state of each service, shows whether the session saves data (the newest run file and its size, or "NOT SAVING DATA" for a
+    `--no-file` session), and sets the side-output filter for the next RUN. The last two use the session page
+    (`../run-control/session-server.py`) under the same proxy and show "unknown" when it cannot be reached. `scripts/webctl-hook.py` runs around
     RUN and STOP: after RUN it waits until every sampler has connected and then switches the root HBF on; before STOP it switches it off.
     The session ends when every device has exited (END) or on Ctrl-C/SIGTERM, and the HBF is switched off then as well.
     Hook results are in `hooks.jsonl` in the output directory. Bind to 127.0.0.1 and reach it through an SSH tunnel

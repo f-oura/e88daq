@@ -13,7 +13,8 @@ Configuration (a bash file, see config/session.env.example):
   SESSION_DATA_DIR  directory of runXXXXXX.dat files
   SESSION_WEBCTL    host:port where the session's daq-webctl listens
 
-For the running session (under the same proxy):
+For the controller page of the running session (nestdaq/webctl/daq-webctl.html, served under the same proxy):
+  GET  recording.json         whether the session writes run files, and the newest runNNNNNN.dat it wrote (name, size)
   GET  run-settings.json      settings of the side-output filter for the next RUN
   POST run-settings           kind (sc, prescale, off) and prescale (N) for the next RUN
 """
@@ -134,6 +135,30 @@ class Sessions:
             with open(self.base / 'sessions.jsonl', 'a') as f:
                 f.write(json.dumps({k: info[k] for k in ('run_number', 'out', 'started', 'command', 'no_file')}) + '\n')
 
+    def recording(self):
+        """Whether the running session writes run files, and the newest runNNNNNN.dat written since it started."""
+        s = self.state()
+        info = {'session_running': bool(s.get('running')), 'no_file': bool(s.get('no_file'))}
+        if not info['session_running'] or info['no_file']:
+            return info
+        newest = None
+        for path in self.data.glob('run*.dat'):
+            if not re.fullmatch(r'run\d{6}\.dat', path.name):
+                continue  # not the side-output files (run<NNNNNN>_sc.dat, ...)
+            try:
+                st = path.stat()
+            except OSError:
+                continue
+            # File times come from the kernel's coarse clock and can be a little behind time.time(): allow 2 s.
+            if st.st_mtime >= s.get('started', 0) - 2 and (newest is None or st.st_mtime > newest[1].st_mtime):
+                newest = (path, st)
+        info['exists'] = newest is not None
+        if newest:
+            path, st = newest
+            info.update(file=path.name, run_number=int(path.name[3:9]), bytes=st.st_size,
+                        seconds_since_write=max(0.0, time.time() - st.st_mtime))
+        return info
+
     def settings_path(self):
         s = self.state()
         if not s.get('running') or not s.get('out'):
@@ -245,6 +270,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send(200, render(self.sessions))
         elif path == '/status.json':
             self.send(200, json.dumps(self.sessions.state()), 'application/json')
+        elif path == '/recording.json':
+            self.send(200, json.dumps(self.sessions.recording()), 'application/json')
         elif path == '/run-settings.json':
             self.send(200, json.dumps(self.sessions.get_settings()), 'application/json')
         else:

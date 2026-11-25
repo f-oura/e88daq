@@ -380,6 +380,8 @@ def run_webctl(a,launch,procs,logs,env,devices,inputs,setup,port,report,keep_pre
     if a.set_hbfstate:opts+=['--set-hbfstate',str(a.set_hbfstate.resolve()),'--root',setup['timing_root']['endpoint']]
     hooks={f'--{e}':shlex.join(hook+[e]+opts) for e in ['pre-run','post-run','pre-stop','post-stop']}
     command=[a.prefix/'bin/daq-webctl','--http-uri',f'http://{a.webctl}','--redis-uri',f'tcp://127.0.0.1:{port}/0']
+    # The controller page of this repository (nestdaq/webctl): state colours, whether data is saved, filter settings.
+    if (ROOT/'nestdaq/webctl/daq-webctl.html').is_file():command+=['--doc-root',ROOT/'nestdaq/webctl']
     for k,v in hooks.items():command+=[k,v]
     launch('webctl',command)
     # daq-webctl terminates when a browser drops its WebSocket abruptly (unhandled "Broken pipe").

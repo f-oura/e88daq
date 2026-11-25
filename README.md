@@ -19,6 +19,7 @@ e88daq/
 ├── nestdaq/
 │   ├── scripts/       fetch and build pinned NestDAQ; run the DAQ chain
 │   ├── devices/       E88 FairMQ devices
+│   ├── webctl/        controller page served by daq-webctl (based on the NestDAQ page)
 │   ├── lib/           Python helpers shared by the scripts (TF/STF format, run file names)
 │   └── topology/      device chains for other board setups
 ├── run-control/       board checks, HR-TDC preparation, and runs (daqctl.py)
