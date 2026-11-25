@@ -1,4 +1,5 @@
-// e88-sc-filter-device: FairMQ device of the SC coincidence filter.
+// e88-sc-filter-device: FairMQ device of the filters (--kind sc: SC coincidence filter with the unbiased prescale,
+// default; --kind prescale: plain prescale, one time frame out of N, no parameters).
 //
 // Receives time frames (for example from the "dqm" output of the TimeFrameBuilder), keeps those in which one SC
 // counter has a leading edge on the up and on the down side within the pair window, and those chosen by the
@@ -7,7 +8,7 @@
 //
 // The run number comes from the NestDAQ run information (property run_number, set by the DAQ service plugin, as
 // for the FileSink); the parameters are read for that run at every RUN. For each run the device writes
-// <marks-dir>/run<NNNNNN>_sc.marks.tsv (reasons of every kept time frame) and run<NNNNNN>_sc.summary.json.
+// <marks-dir>/run<NNNNNN>_<sc|ps>.marks.tsv (reasons of every kept time frame) and run<NNNNNN>_<sc|ps>.summary.json.
 //
 // The device must never hold up the main data stream: on the "dqm" output the TimeFrameBuilder sends only when
 // this device can take the time frame, and skips it otherwise. If the parameters cannot be read, the device logs
@@ -32,6 +33,7 @@ struct OptionKey {
   static constexpr const char* InputChannelName = "in-chan-name";
   static constexpr const char* OutputChannelName = "out-chan-name";
   static constexpr const char* RunNumber = "run_number";
+  static constexpr const char* Kind = "kind";
   static constexpr const char* MarksDir = "marks-dir";
   static constexpr const char* Prescale = "prescale";
   static constexpr const char* PrescaleOffset = "prescale-offset";
@@ -45,9 +47,9 @@ struct OptionKey {
   static constexpr const char* AllowUnassigned = "e88-allow-unassigned";
 };
 
-std::string RunStem(std::uint64_t run) {
-  char b[32];
-  std::snprintf(b, sizeof(b), "run%06llu_sc", static_cast<unsigned long long>(run));
+std::string RunStem(std::uint64_t run, e88filter::FilterKind kind) {
+  char b[40];
+  std::snprintf(b, sizeof(b), "run%06llu_%s", static_cast<unsigned long long>(run), e88filter::KindSuffix(kind));
   return b;
 }
 
@@ -59,6 +61,8 @@ class ScFilterDevice : public fair::mq::Device {
     fMarksDir = fConfig->GetProperty<std::string>(OptionKey::MarksDir);
     if (fMarksDir.empty()) throw std::runtime_error("--marks-dir is required");
     fOptions = e88filter::ScFilterOptions{};
+    if (!e88filter::ParseKind(fConfig->GetProperty<std::string>(OptionKey::Kind), fOptions.kind))
+      throw std::runtime_error("--kind must be sc or prescale");
     fOptions.prescale = std::stoull(fConfig->GetProperty<std::string>(OptionKey::Prescale));
     fOptions.prescaleOffset = std::stoull(fConfig->GetProperty<std::string>(OptionKey::PrescaleOffset));
     if (fOptions.prescale == 0) throw std::runtime_error("--prescale N (N >= 1) is required: an unbiased prescale is always mixed in");
@@ -72,14 +76,14 @@ class ScFilterDevice : public fair::mq::Device {
     fOptions.param.channelMap = fConfig->GetProperty<std::string>(OptionKey::ChannelMap);
     fOptions.param.settings = fConfig->GetProperty<std::string>(OptionKey::Settings);
     fOptions.param.allowUnassigned = fConfig->GetProperty<bool>(OptionKey::AllowUnassigned);
-    LOG(info) << "e88-sc-filter: prescale " << fOptions.prescale << " offset " << fOptions.prescaleOffset
+    LOG(info) << "e88-sc-filter: kind " << e88filter::KindName(fOptions.kind) << ", prescale " << fOptions.prescale << " offset " << fOptions.prescaleOffset
               << ", marks in " << fMarksDir;
   }
 
   void PreRun() override {
     fRun = 0;
     if (fConfig->Count(OptionKey::RunNumber)) fRun = std::stoull(fConfig->GetProperty<std::string>(OptionKey::RunNumber));
-    fStem = fMarksDir + "/" + RunStem(fRun);
+    fStem = fMarksDir + "/" + RunStem(fRun, fOptions.kind);
     fSendFailed = 0;
     std::string error;
     fActive = fFilter.Begin(fOptions, fRun, fStem + ".marks.tsv", error);
@@ -131,7 +135,7 @@ class ScFilterDevice : public fair::mq::Device {
                 << c.scPass << ", prescaled " << c.prescaled << ", malformed " << c.malformed << "), send failed "
                 << fSendFailed;
     } else {
-      summary = "{\n  \"filter\": \"sc_pair\",\n  \"device\": true,\n  \"run_number\": " + std::to_string(fRun) +
+      summary = "{\n  \"filter\": \"" + std::string(e88filter::KindName(fOptions.kind)) + "\",\n  \"device\": true,\n  \"run_number\": " + std::to_string(fRun) +
                 ",\n  \"error\": " + e88filter::JsonString(fError) + ",\n  \"received\": " +
                 std::to_string(fReceivedInactive) + ",\n  \"kept\": 0\n}\n";
     }
@@ -161,6 +165,8 @@ void addCustomOptions(bpo::options_description& options) {
     (OptionKey::InputChannelName, bpo::value<std::string>()->default_value("in"), "Name of the input channel")
     (OptionKey::OutputChannelName, bpo::value<std::string>()->default_value("out"), "Name of the output channel")
     (OptionKey::RunNumber, bpo::value<std::string>(), "Run number (given by the DAQ service plugin)")
+    (OptionKey::Kind, bpo::value<std::string>()->default_value("sc"),
+     "sc: SC up/down coincidence filter with the prescale; prescale: only the prescale (no parameters)")
     (OptionKey::MarksDir, bpo::value<std::string>()->default_value(""),
      "Directory of run<NNNNNN>_sc.marks.tsv and run<NNNNNN>_sc.summary.json (required)")
     (OptionKey::Prescale, bpo::value<std::string>()->default_value("0"),

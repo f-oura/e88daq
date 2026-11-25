@@ -41,6 +41,8 @@ Normally these are started by `run-control/daqctl.py`, not by hand.
     of the TimeFrameBuilder, and a second FileSink (`FilterSink`) writes the kept time frames to `runXXXXXX_sc.dat` next to
     the run file, with `runXXXXXX_sc.marks.tsv` and `runXXXXXX_sc.summary.json`. The run file is unchanged: the TimeFrameBuilder
     sends to the side output only when the filter can take the time frame. The summaries are copied into the chain report.
+    `--prescale-filter N` runs the plain prescale (1 of N time frames, content not read, no parameters) the same way and writes
+    `runXXXXXX_ps.dat`. One side-output filter per session.
   - `--webctl ADDR:PORT` starts `daq-webctl` (the NestDAQ web controller) at that address and leaves the state transitions,
     RUN, STOP, the run number, and END to the browser (`http://ADDR:PORT/daq-webctl.html`). `scripts/webctl-hook.py` runs around
     RUN and STOP: after RUN it waits until every sampler has connected and then switches the root HBF on; before STOP it switches it off.

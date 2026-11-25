@@ -31,6 +31,7 @@ run-control/daqctl.py run     --reader "$READER" --writer "$WRITER" --set-hbfsta
   The Receiver output stays enabled for the whole session and is restored afterwards, as in a normal run.
 - `run --sc-filter-prescale N --e88-param <e88param>/<series>/index.txt` (timeframe run) also writes `runXXXXXX_sc.dat`, the time frames
   kept by the SC coincidence filter on the TimeFrameBuilder side output (`../online-filter`), with an unbiased prescale of 1 in N.
+  `run --prescale-filter N` writes `runXXXXXX_ps.dat` with the plain prescale (1 of N time frames) instead.
   Build the filter first (`../online-filter/README.md`).
 - `session-server.py` serves a small page (loopback only, behind the password-protected proxy in `../web/`) that starts
   such a `--webctl` session with an explicit run number and shows the result of the last one. Before starting it checks that

@@ -6,6 +6,7 @@
 
 #include "Builder.hh"
 #include "Prescale.hh"
+#include "ScFilterRun.hh"
 #include "ScPairFilter.hh"
 
 using namespace ndatest;
@@ -142,6 +143,37 @@ int main() {
     CHECK_EQ(n, 100);
     CHECK(p.Select(3) && p.Select(13) && !p.Select(0));
     CHECK(p.Configure(1, 0, error) && p.Select(7));
+  }
+  // Plain prescale (kind prescale): no parameters, the content is not read, one TF out of N is kept by position.
+  {
+    e88filter::ScFilterOptions po;
+    po.kind = e88filter::FilterKind::kPrescale;
+    po.prescale = 4;
+    po.prescaleOffset = 1;
+    e88filter::ScFilterRun run;
+    std::remove("t_ps.marks.tsv");
+    CHECK(run.Begin(po, 18, "t_ps.marks.tsv", error));
+    const auto pair = Frame({{kFemA, 2, 1000}, {kFemA, 3, 1000}});  // an SC pair: not a reason for this kind
+    const std::vector<std::uint64_t> garbage(4, 0x1234);             // not a time frame: kept if selected
+    int kept = 0;
+    for (int i = 0; i < 20; ++i) {
+      const auto& tf = i == 5 ? garbage : pair;
+      const bool k = run.Process(reinterpret_cast<const std::uint8_t*>(tf.data()), i == 5 ? 32 : Bytes(tf));
+      CHECK_EQ(k, i % 4 == 1);
+      kept += k ? 1 : 0;
+    }
+    CHECK_EQ(kept, 5);
+    CHECK_EQ(run.Counts().scPass, std::uint64_t{0});
+    CHECK_EQ(run.Counts().malformed, std::uint64_t{0});
+    const std::string summary = run.End();
+    CHECK(summary.find("\"filter\": \"prescale\"") != std::string::npos);
+    CHECK(summary.find("\"kept\": 5") != std::string::npos);
+    e88filter::ScFilterRun again;
+    CHECK(!again.Begin(po, 18, "t_ps.marks.tsv", error));  // outputs are never overwritten
+    po.prescale = 0;
+    std::remove("t_ps2.marks.tsv");
+    CHECK(!again.Begin(po, 18, "t_ps2.marks.tsv", error));  // no prescale-less setting
+    std::remove("t_ps.marks.tsv");
   }
   std::remove("t_det.txt");
   std::remove("t_map.txt");

@@ -1,6 +1,8 @@
-// One run of the SC coincidence filter with the unbiased prescale, shared by the file version and the FairMQ
-// device: loads the E88 parameters for the run, judges each time frame, writes the marks of the kept time frames
-// and the summary. The caller writes or sends the kept time frames unchanged.
+// One run of a filter, shared by the file versions and the FairMQ device. Two kinds:
+//   sc        SC coincidence filter with the unbiased prescale: loads the E88 parameters for the run and keeps the
+//             time frames with an SC up/down pair, and the prescaled ones
+//   prescale  plain prescale: keeps one time frame out of N by position; no parameters, the content is not read
+// It writes the marks of the kept time frames and the summary. The caller writes or sends the kept time frames unchanged.
 // This file depends on neither ROOT nor FairMQ.
 #pragma once
 
@@ -17,8 +19,21 @@
 
 namespace e88filter {
 
+enum class FilterKind { kSc, kPrescale };
+inline const char* KindName(FilterKind k) { return k == FilterKind::kSc ? "sc_pair" : "prescale"; }
+// "sc" or "prescale"; false for anything else.
+inline bool ParseKind(const std::string& s, FilterKind& k) {
+  if (s == "sc") k = FilterKind::kSc;
+  else if (s == "prescale") k = FilterKind::kPrescale;
+  else return false;
+  return true;
+}
+// Suffix of the output names: run<NNNNNN>_<suffix>.dat
+inline const char* KindSuffix(FilterKind k) { return k == FilterKind::kSc ? "sc" : "ps"; }
+
 struct ScFilterOptions {
-  ParamOptions param;
+  FilterKind kind = FilterKind::kSc;
+  ParamOptions param;         // sc only
   double windowNs = -1;        // <= 0: sc_pair_window of the settings
   double tdcLsbNs = -1;        // <= 0: tdc_lsb_ns of the settings
   std::vector<int> modules;    // SC modules; empty: every SC plane with two sides
@@ -46,6 +61,7 @@ class ScFilterRun {
   const std::string& LastError() const { return fLastError; }
 
  private:
+  bool BeginSc(const ScFilterOptions& options, std::uint64_t run, std::string& error);
   ScFilterOptions fOptions;
   Parameters fParams;
   ScPairConfig fConfig;

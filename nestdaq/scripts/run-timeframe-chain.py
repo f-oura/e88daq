@@ -16,6 +16,8 @@ The HBF is switched off again whenever the session ends.
 "dqm" side output of the TimeFrameBuilder and writes the kept time frames with a second FileSink to
 run<NNNNNN>_sc.dat next to the run file (marks and summary beside it). The run file itself is unchanged;
 the TimeFrameBuilder skips the side output when the filter cannot take a time frame.
+--prescale-filter N runs the plain prescale (one time frame out of N, content not read) the same way and writes
+run<NNNNNN>_ps.dat. One side-output filter per session.
 """
 import argparse,json,math,os,re,shlex,signal,socket,subprocess,time,sys
 from pathlib import Path
@@ -80,7 +82,8 @@ def main():
     p.add_argument('--webctl',metavar='ADDR:PORT',help='hand control to daq-webctl listening here (for example 127.0.0.1:8080); --seconds is ignored')
     p.add_argument('--sc-filter-prescale',type=int,metavar='N',help='run the SC coincidence filter on the dqm output; N: unbiased prescale (keep 1 of N time frames regardless of content, N >= 1)')
     p.add_argument('--e88-param',type=Path,help='E88 parameter index for the SC filter (required with --sc-filter-prescale)')
-    p.add_argument('--sc-filter-exe',type=Path,default=ROOT/'build/online-filter/bin/e88-sc-filter-device',help='SC filter device executable')
+    p.add_argument('--prescale-filter',type=int,metavar='N',help='run the plain prescale filter on the dqm output: keep 1 of N time frames (N >= 1), run<NNNNNN>_ps.dat')
+    p.add_argument('--sc-filter-exe',type=Path,default=ROOT/'build/online-filter/bin/e88-sc-filter-device',help='filter device executable (both kinds)')
     a=p.parse_args()
     if not a.prefix or a.seconds<=0 or not math.isfinite(a.seconds) or a.output.exists():p.error('prefix required, seconds positive, output must be new')
     a.output=a.output.resolve();a.prefix=a.prefix.resolve()
@@ -99,14 +102,16 @@ def main():
         if data_dir.exists():p.error('replay data directory exists')
         data_dir.mkdir(parents=True)
     data_file=output_path(data_dir,a.run_number)
-    sc_filter=a.sc_filter_prescale is not None
+    if a.sc_filter_prescale is not None and a.prescale_filter is not None:p.error('one side-output filter per session: --sc-filter-prescale or --prescale-filter')
+    sc_filter=a.sc_filter_prescale is not None or a.prescale_filter is not None
     if sc_filter:
-        if a.sc_filter_prescale<1:p.error('--sc-filter-prescale must be at least 1 (an unbiased prescale is always mixed in)')
-        if not a.e88_param or not a.e88_param.is_file():p.error('--sc-filter-prescale needs --e88-param <index>')
-        if not a.sc_filter_exe.is_file():p.error(f'SC filter device not built: {a.sc_filter_exe}')
-        stem=data_file.parent/f'run{a.run_number:06d}_sc'
+        kind,suffix,factor=('sc','sc',a.sc_filter_prescale) if a.sc_filter_prescale is not None else ('prescale','ps',a.prescale_filter)
+        if factor<1:p.error('the prescale factor must be at least 1')
+        if kind=='sc' and (not a.e88_param or not a.e88_param.is_file()):p.error('--sc-filter-prescale needs --e88-param <index>')
+        if not a.sc_filter_exe.is_file():p.error(f'filter device not built: {a.sc_filter_exe}')
+        stem=data_file.parent/f'run{a.run_number:06d}_{suffix}'
         for x in [stem.with_suffix('.dat'),Path(f'{stem}.marks.tsv'),Path(f'{stem}.summary.json')]:
-            if x.exists():p.error(f'refusing existing SC filter output: {x}')
+            if x.exists():p.error(f'refusing existing filter output: {x}')
     a.output.mkdir(parents=True,exist_ok=bool(a.replay and not a.data_dir))
     env=dict(os.environ);env['LD_LIBRARY_PATH']=f'{a.prefix}/lib64:{a.prefix}/lib:'+env.get('LD_LIBRARY_PATH','')
     procs={};logs={};hbf_attempted=False;hbf_off_attempted=False;report={'mode':('replay' if a.replay else 'live')+('+webctl' if a.webctl else ''),'hardware_control':'Root HBF gate' if a.set_hbfstate else 'none','setup_manifest':str(a.manifest),'hbf_events':[],'run_number':a.run_number,'data_file':str(data_file),'sources':{},'states':{},'commands':{}}
@@ -163,7 +168,7 @@ def main():
         endpoints=[('FileSink','in','pull','connect'),('TimeFrameBuilder','out','push','bind'),('TimeFrameBuilder','in','pull','bind')]
         links=[('TimeFrameBuilder','out','FileSink','in')]
         if sc_filter:
-            # Side output: TimeFrameBuilder dqm -> ScFilter -> FilterSink (run<NNNNNN>_sc.dat).
+            # Side output: TimeFrameBuilder dqm -> ScFilter -> FilterSink (run<NNNNNN>_sc.dat or _ps.dat).
             endpoints+=[('TimeFrameBuilder','dqm','push','bind'),('ScFilter','in','pull','connect'),('ScFilter','out','push','bind'),('FilterSink','in','pull','connect')]
             links+=[('TimeFrameBuilder','dqm','ScFilter','in'),('ScFilter','out','FilterSink','in')]
         for service in roles:
@@ -179,9 +184,11 @@ def main():
         def command(service,exe,args):return [exe,*common,'--service-name',service,'--id',f'{service}-{tag}',*args]
         launch('FileSink',command('FileSink',a.prefix/'bin/FileSink',['--in-chan-name','in','--prefix',data_file.parent,'--run-number-format','run{:06d}','--run_number',str(a.run_number),'--ext','.dat','--openmode','create','--discard','false','--multipart','false']))
         if sc_filter:
-            launch('FilterSink',command('FilterSink',a.prefix/'bin/FileSink',['--in-chan-name','in','--prefix',data_file.parent,'--run-number-format','run{:06d}_sc','--run_number',str(a.run_number),'--ext','.dat','--openmode','create','--discard','false','--multipart','false']))
-            launch('ScFilter',command('ScFilter',a.sc_filter_exe.resolve(),['--in-chan-name','in','--out-chan-name','out','--run_number',str(a.run_number),'--marks-dir',data_file.parent,'--prescale',str(a.sc_filter_prescale),'--e88-param',a.e88_param.resolve()]))
-            report['sc_filter']={'prescale':a.sc_filter_prescale,'e88_param':str(a.e88_param.resolve()),'executable':str(a.sc_filter_exe.resolve())}
+            launch('FilterSink',command('FilterSink',a.prefix/'bin/FileSink',['--in-chan-name','in','--prefix',data_file.parent,'--run-number-format','run{:06d}_'+suffix,'--run_number',str(a.run_number),'--ext','.dat','--openmode','create','--discard','false','--multipart','false']))
+            args=['--in-chan-name','in','--out-chan-name','out','--run_number',str(a.run_number),'--marks-dir',data_file.parent,'--kind',kind,'--prescale',str(factor)]
+            if kind=='sc':args+=['--e88-param',a.e88_param.resolve()]
+            launch('ScFilter',command('ScFilter',a.sc_filter_exe.resolve(),args))
+            report['side_filter']={'kind':kind,'prescale':factor,'e88_param':str(a.e88_param.resolve()) if kind=='sc' else None,'executable':str(a.sc_filter_exe.resolve())}
         for group in ['TimeFrameBuilder',f'TimeFrameBuilder-{tag}']:r('HSET','parameters:'+group,'metrics-uri',f'tcp://127.0.0.1:{port}/0',db=2)
         launch('TimeFrameBuilder',command('TimeFrameBuilder',a.prefix/'bin/TimeFrameBuilder',['--in-chan-name','in','--out-chan-name','out','--buffer-timeout','2000','--buffer-depth-limit','10000','--output-incomplete-tf','true','--discard-output','false']))
         for index,(svc,role) in enumerate(roles.items()):
@@ -249,11 +256,11 @@ def main():
         if sc_filter:
             # Summaries written by the filter at every STOP of this session (one per run number).
             summaries={}
-            for f in sorted(data_file.parent.glob('run*_sc.summary.json')):
+            for f in sorted(data_file.parent.glob(f'run*_{suffix}.summary.json')):
                 if f.stat().st_mtime>=started:
                     try:summaries[f.name]=json.loads(f.read_text())
                     except ValueError as exc:summaries[f.name]={'unreadable':str(exc)}
-            report['sc_filter_summaries']=summaries
+            report['side_filter_summaries']=summaries
         (a.output/'report.json').write_text(json.dumps(report,indent=2)+'\n')
 def run_webctl(a,launch,procs,logs,env,devices,inputs,setup,port,report,keep_presence):
     """Start daq-webctl with the HBF hooks and wait until the devices end or a signal arrives."""

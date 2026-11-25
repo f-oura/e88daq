@@ -126,6 +126,7 @@ def main(argv=None):
     ap.add_argument('--builder', choices=['timeframe','separate-stf'], default='timeframe', help='run output topology (default: TimeFrameBuilder over every data source)')
     ap.add_argument('--sc-filter-prescale', type=int, metavar='N', help='timeframe run: also write run<NNNNNN>_sc.dat with the SC coincidence filter on the side output; N: unbiased prescale (>= 1)')
     ap.add_argument('--e88-param', help='E88 parameter index for the SC filter (required with --sc-filter-prescale)')
+    ap.add_argument('--prescale-filter', type=int, metavar='N', help='timeframe run: also write run<NNNNNN>_ps.dat with 1 of N time frames (plain prescale on the side output)')
     args = ap.parse_args(argv)
     out = pathlib.Path(args.out).resolve()
     out.mkdir(parents=True, exist_ok=False)
@@ -154,12 +155,19 @@ def main(argv=None):
             raise ValueError('run-number/data-dir options apply to timeframe mode only')
         if args.webctl and (args.action != 'run' or args.builder != 'timeframe'):
             raise ValueError('--webctl applies to the timeframe run only')
-        if args.sc_filter_prescale is not None:
+        if args.sc_filter_prescale is not None or args.prescale_filter is not None:
             if args.action != 'run' or args.builder != 'timeframe':
-                raise ValueError('--sc-filter-prescale applies to the timeframe run only')
+                raise ValueError('side-output filters apply to the timeframe run only')
+            if args.sc_filter_prescale is not None and args.prescale_filter is not None:
+                raise ValueError('one side-output filter per session: --sc-filter-prescale or --prescale-filter')
+        if args.sc_filter_prescale is not None:
             if args.sc_filter_prescale < 1 or not args.e88_param:
                 raise ValueError('--sc-filter-prescale needs N >= 1 and --e88-param')
-            result['sc_filter'] = {'prescale': args.sc_filter_prescale, 'e88_param': args.e88_param}
+            result['side_filter'] = {'kind': 'sc', 'prescale': args.sc_filter_prescale, 'e88_param': args.e88_param}
+        if args.prescale_filter is not None:
+            if args.prescale_filter < 1:
+                raise ValueError('--prescale-filter needs N >= 1')
+            result['side_filter'] = {'kind': 'prescale', 'prescale': args.prescale_filter}
         for name, board in boards.items():
             result['boards'][name] = inspect(board, args.reader, events)
         root = next(b for b in boards.values() if b['role'] == 'root')
@@ -187,6 +195,8 @@ def main(argv=None):
                     cmd += ['--webctl', args.webctl]
                 if args.sc_filter_prescale is not None:
                     cmd += ['--sc-filter-prescale', str(args.sc_filter_prescale), '--e88-param', args.e88_param]
+                if args.prescale_filter is not None:
+                    cmd += ['--prescale-filter', str(args.prescale_filter)]
             else:
                 cmd = [sys.executable, str(ROOT/'nestdaq/scripts/run-separate-stf.py'), '--root', root['endpoint'], '--set-hbfstate', args.set_hbfstate, '--on', str(args.seconds), '--summary', str(out/'capture.json')]
                 for name, board in boards.items():

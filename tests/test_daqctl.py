@@ -136,6 +136,16 @@ class WebctlTests(unittest.TestCase):
             with tempfile.TemporaryDirectory() as d, patch.object(m,'inspect') as inspect, patch.object(m,'capture_with_receiver_output') as capture:
                 rc=m.main(SETUP+['run','--reader','/r','--writer','/w','--set-hbfstate','/h','--run-number','42','--data-dir',d,'--out',d+'/run']+extra)
                 self.assertEqual(rc,2);inspect.assert_not_called();capture.assert_not_called()
+    def test_prescale_filter_passed_to_timeframe_chain(self):
+        with tempfile.TemporaryDirectory() as d, patch.object(m,'inspect',return_value={'linked':True,'ready':True}), patch.object(m,'read',return_value=0), patch.object(m,'capture_with_receiver_output') as capture:
+            rc=m.main(SETUP+['run','--reader','/r','--writer','/w','--set-hbfstate','/h','--run-number','42','--data-dir',d,'--out',d+'/run','--prescale-filter','100'])
+            self.assertEqual(rc,0)
+            cmd=capture.call_args.args[4]
+            self.assertEqual(cmd[cmd.index('--prescale-filter')+1],'100');self.assertNotIn('--sc-filter-prescale',cmd)
+    def test_one_side_filter_per_session(self):
+        with tempfile.TemporaryDirectory() as d, patch.object(m,'inspect') as inspect, patch.object(m,'capture_with_receiver_output') as capture:
+            rc=m.main(SETUP+['run','--reader','/r','--writer','/w','--set-hbfstate','/h','--run-number','42','--data-dir',d,'--out',d+'/run','--prescale-filter','100','--sc-filter-prescale','100','--e88-param','/p'])
+            self.assertEqual(rc,2);inspect.assert_not_called();capture.assert_not_called()
     def test_webctl_rejected_outside_timeframe_run(self):
         with tempfile.TemporaryDirectory() as d, patch.object(m,'inspect') as inspect:
             rc=m.main(SETUP+['status','--reader','/r','--out',d+'/s','--webctl','127.0.0.1:8080'])

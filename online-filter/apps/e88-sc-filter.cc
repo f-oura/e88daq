@@ -1,5 +1,7 @@
-// File version of the SC coincidence filter.
+// File version of the filters: the SC coincidence filter (--kind sc, default of e88-sc-filter) and the plain
+// prescale (--kind prescale, default of e88-prescale-filter, built from this file).
 //
+// SC coincidence filter:
 // Reads a file written by the NestDAQ FileSink, keeps the time frames in which one SC counter (SC1 or SC2, one
 // segment) has a leading edge on the up and on the down side within the pair window, and always keeps the time
 // frames chosen by an unbiased prescale. The output is a FileSink file of the same form (header, kept time
@@ -20,11 +22,20 @@
 #include "ScFilterRun.hh"
 #include "format/FileReader.hh"
 
+#ifndef E88_FILTER_DEFAULT_KIND
+#define E88_FILTER_DEFAULT_KIND "sc"
+#endif
+#ifndef E88_FILTER_NAME
+#define E88_FILTER_NAME "e88-sc-filter"
+#endif
+
 namespace {
 
 void Usage() {
   std::cerr <<
-      "usage: e88-sc-filter --input RUN.dat --output OUT.dat --prescale N [options]\n"
+      "usage: " E88_FILTER_NAME " --input RUN.dat --output OUT.dat --prescale N [options]\n"
+      "  --kind sc|prescale      sc: SC up/down coincidence and prescale; prescale: only the prescale, no parameters\n"
+      "                          (default " E88_FILTER_DEFAULT_KIND ")\n"
       "  --input FILE            FileSink file to read\n"
       "  --output FILE           filtered FileSink file to write (must not exist)\n"
       "  --prescale N            keep every N-th time frame regardless of its content (required, N >= 1)\n"
@@ -61,16 +72,23 @@ int main(int argc, char** argv) {
   e88filter::ScFilterOptions options;
   long long run = -1, maxFrames = -1;
   bool havePrescale = false;
+  e88filter::ParseKind(E88_FILTER_DEFAULT_KIND, options.kind);
   for (int i = 1; i < argc; ++i) {
     const std::string a = argv[i];
     auto value = [&]() -> std::string {
       if (i + 1 >= argc) {
-        std::cerr << "e88-sc-filter: " << a << " needs a value\n";
+        std::cerr << E88_FILTER_NAME ": " << a << " needs a value\n";
         std::exit(2);
       }
       return argv[++i];
     };
-    if (a == "--input") input = value();
+    if (a == "--kind") {
+      if (!e88filter::ParseKind(value(), options.kind)) {
+        std::cerr << E88_FILTER_NAME ": --kind must be sc or prescale\n";
+        return 2;
+      }
+    }
+    else if (a == "--input") input = value();
     else if (a == "--output") output = value();
     else if (a == "--prescale") { options.prescale = std::stoull(value()); havePrescale = true; }
     else if (a == "--prescale-offset") options.prescaleOffset = std::stoull(value());
@@ -90,10 +108,10 @@ int main(int argc, char** argv) {
     else if (a == "--summary") summaryPath = value();
     else if (a == "--max-frames") maxFrames = std::stoll(value());
     else if (a == "-h" || a == "--help") { Usage(); return 0; }
-    else { std::cerr << "e88-sc-filter: unknown option " << a << "\n"; Usage(); return 2; }
+    else { std::cerr << E88_FILTER_NAME ": unknown option " << a << "\n"; Usage(); return 2; }
   }
   if (input.empty() || output.empty() || !havePrescale) {
-    std::cerr << "e88-sc-filter: --input, --output and --prescale are required\n";
+    std::cerr << E88_FILTER_NAME ": --input, --output and --prescale are required\n";
     Usage();
     return 2;
   }
@@ -101,7 +119,7 @@ int main(int argc, char** argv) {
   if (summaryPath.empty()) summaryPath = output + ".summary.json";
   for (const auto& p : {output, marksPath, summaryPath}) {
     if (Exists(p)) {
-      std::cerr << "e88-sc-filter: " << p << " exists; outputs are never overwritten\n";
+      std::cerr << E88_FILTER_NAME ": " << p << " exists; outputs are never overwritten\n";
       return 2;
     }
   }
@@ -109,32 +127,32 @@ int main(int argc, char** argv) {
   std::string error;
   nda::format::FileReader reader;
   if (!reader.Open(input, error)) {
-    std::cerr << "e88-sc-filter: " << error << "\n";
+    std::cerr << E88_FILTER_NAME ": " << error << "\n";
     return 1;
   }
   const auto& info = reader.Info();
   if (run < 0 && !info.hasFileSinkHeader) {
-    std::cerr << "e88-sc-filter: the input has no FileSink header; give --run\n";
+    std::cerr << E88_FILTER_NAME ": the input has no FileSink header; give --run\n";
     return 2;
   }
   const std::uint64_t runNumber = run >= 0 ? static_cast<std::uint64_t>(run) : info.runNumber;
   e88filter::ScFilterRun filter;
   if (!filter.Begin(options, runNumber, marksPath, error)) {
-    std::cerr << "e88-sc-filter: " << error << "\n";
+    std::cerr << E88_FILTER_NAME ": " << error << "\n";
     return 2;
   }
-  for (const auto& w : filter.Params().warnings) std::cerr << "e88-sc-filter: warning: " << w << "\n";
+  for (const auto& w : filter.Params().warnings) std::cerr << E88_FILTER_NAME ": warning: " << w << "\n";
 
   std::ofstream out(output, std::ios::binary);
   if (!out) {
-    std::cerr << "e88-sc-filter: cannot create " << output << "\n";
+    std::cerr << E88_FILTER_NAME ": cannot create " << output << "\n";
     return 1;
   }
   constexpr std::size_t kBlock = 304;  // FileSink header and trailer
   if (info.hasFileSinkHeader) {
     std::vector<char> header;
     if (!ReadBlock(input, 0, kBlock, header)) {
-      std::cerr << "e88-sc-filter: cannot read the FileSink header again\n";
+      std::cerr << E88_FILTER_NAME ": cannot read the FileSink header again\n";
       return 1;
     }
     out.write(header.data(), static_cast<std::streamsize>(header.size()));
@@ -149,7 +167,7 @@ int main(int argc, char** argv) {
       break;
     }
     if (status != nda::format::FileReader::Status::kFrame) {
-      std::cerr << "e88-sc-filter: " << error << "\n";
+      std::cerr << E88_FILTER_NAME ": " << error << "\n";
       return 1;
     }
     if (filter.Process(reinterpret_cast<const std::uint8_t*>(buffer.data()), size))
@@ -158,14 +176,14 @@ int main(int argc, char** argv) {
   if (complete && info.hasFileSinkTrailer) {
     std::vector<char> trailer;
     if (!ReadBlock(input, reader.Offset() - kBlock, kBlock, trailer)) {
-      std::cerr << "e88-sc-filter: cannot read the FileSink trailer again\n";
+      std::cerr << E88_FILTER_NAME ": cannot read the FileSink trailer again\n";
       return 1;
     }
     out.write(trailer.data(), static_cast<std::streamsize>(trailer.size()));
   }
   out.close();
   if (!out) {
-    std::cerr << "e88-sc-filter: write error on " << output << "\n";
+    std::cerr << E88_FILTER_NAME ": write error on " << output << "\n";
     return 1;
   }
   const std::string summary = filter.End({{"input", e88filter::JsonString(input)},

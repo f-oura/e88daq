@@ -34,6 +34,12 @@ add_executable(e88-sc-filter apps/e88-sc-filter.cc)
 target_link_libraries(e88-sc-filter PRIVATE e88filter_core)
 target_compile_options(e88-sc-filter PRIVATE ${WARN})
 install(TARGETS e88-sc-filter RUNTIME DESTINATION bin)
+# The plain prescale filter: the same program with --kind prescale as default.
+add_executable(e88-prescale-filter apps/e88-sc-filter.cc)
+target_compile_definitions(e88-prescale-filter PRIVATE E88_FILTER_DEFAULT_KIND="prescale" E88_FILTER_NAME="e88-prescale-filter")
+target_link_libraries(e88-prescale-filter PRIVATE e88filter_core)
+target_compile_options(e88-prescale-filter PRIVATE ${WARN})
+install(TARGETS e88-prescale-filter RUNTIME DESTINATION bin)
 
 # FairMQ device (built when FairMQ is found, e.g. with CMAKE_PREFIX_PATH=<nestdaq prefix>).
 set(E88_FILTER_BUILD_DEVICES "AUTO" CACHE STRING "Build the FairMQ device: AUTO, ON or OFF")
