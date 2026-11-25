@@ -25,5 +25,5 @@ upstream:
     status: candidate
 submodules:
   online-analyzer:
-    url: https://github.com/f-oura/NestdaqAnalyzer.git
+    url: https://github.com/jparc-saphire/NestdaqAnalyzer.git
     note: pinned by the submodule commit
