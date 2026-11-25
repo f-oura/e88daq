@@ -18,6 +18,9 @@ run<NNNNNN>_sc.dat next to the run file (marks and summary beside it). The run f
 the TimeFrameBuilder skips the side output when the filter cannot take a time frame.
 --prescale-filter N runs the plain prescale (one time frame out of N, content not read) the same way and writes
 run<NNNNNN>_ps.dat. One side-output filter per session.
+--analyzer-http ADDR:PORT runs the online analyzer (nda-replay --follow) on the run file being written and serves its
+histograms there (THttpServer / JSROOT). It reads the file only, so it cannot slow the DAQ down; a new run file (a new
+run number at RUN) gets a new analyzer, and the last one keeps serving until the next run or the end of the session.
 """
 import argparse,json,math,os,re,shlex,signal,socket,subprocess,time,sys
 from pathlib import Path
@@ -25,6 +28,7 @@ import yaml
 ROOT=Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(ROOT/'nestdaq/lib'))
 from run_storage import output_path
+from online_analyzer import RunFileFollower, analyzer_command, parse_http, port_free
 
 
 def service_base(name):
@@ -84,6 +88,8 @@ def main():
     p.add_argument('--e88-param',type=Path,help='E88 parameter index for the SC filter (required with --sc-filter-prescale)')
     p.add_argument('--prescale-filter',type=int,metavar='N',help='run the plain prescale filter on the dqm output: keep 1 of N time frames (N >= 1), run<NNNNNN>_ps.dat')
     p.add_argument('--sc-filter-exe',type=Path,default=ROOT/'build/online-filter/bin/e88-sc-filter-device',help='filter device executable (both kinds)')
+    p.add_argument('--analyzer-http',metavar='ADDR:PORT',help='run the online analyzer on the run file and serve its histograms here (for example 127.0.0.1:18090); uses --e88-param when given')
+    p.add_argument('--analyzer-exe',type=Path,default=ROOT/'build/online-analyzer/bin/nda-replay',help='online analyzer executable (nda-replay)')
     a=p.parse_args()
     if not a.prefix or a.seconds<=0 or not math.isfinite(a.seconds) or a.output.exists():p.error('prefix required, seconds positive, output must be new')
     a.output=a.output.resolve();a.prefix=a.prefix.resolve()
@@ -112,6 +118,11 @@ def main():
         stem=data_file.parent/f'run{a.run_number:06d}_{suffix}'
         for x in [stem.with_suffix('.dat'),Path(f'{stem}.marks.tsv'),Path(f'{stem}.summary.json')]:
             if x.exists():p.error(f'refusing existing filter output: {x}')
+    if a.analyzer_http:
+        try:parse_http(a.analyzer_http)
+        except ValueError as exc:p.error(str(exc))
+        if not a.analyzer_exe.is_file():p.error(f'online analyzer not built: {a.analyzer_exe}')
+        if a.e88_param and not a.e88_param.is_file():p.error(f'no parameter index: {a.e88_param}')
     a.output.mkdir(parents=True,exist_ok=bool(a.replay and not a.data_dir))
     env=dict(os.environ);env['LD_LIBRARY_PATH']=f'{a.prefix}/lib64:{a.prefix}/lib:'+env.get('LD_LIBRARY_PATH','')
     procs={};logs={};hbf_attempted=False;hbf_off_attempted=False;report={'mode':('replay' if a.replay else 'live')+('+webctl' if a.webctl else ''),'hardware_control':'Root HBF gate' if a.set_hbfstate else 'none','setup_manifest':str(a.manifest),'hbf_events':[],'run_number':a.run_number,'data_file':str(data_file),'sources':{},'states':{},'commands':{}}
@@ -144,6 +155,18 @@ def main():
         except Exception as exc:
             event['error']=str(exc);raise
     started=time.time()
+    follower=None;analyzer_logs=[]
+    if a.analyzer_http:
+        fems=[str(setup['data_sources'][role]['endpoint']) for role in roles.values()]
+        param=a.e88_param.resolve() if a.e88_param else None
+        def spawn(command,log_path):
+            log=open(log_path,'a');analyzer_logs.append(log)
+            # Lower priority than the DAQ processes; the analyzer may fall behind, the DAQ must not.
+            return subprocess.Popen(command,stdout=log,stderr=subprocess.STDOUT,env=env,cwd=ROOT,preexec_fn=lambda:os.nice(10))
+        follower=RunFileFollower(data_file.parent,started,
+            lambda f,use_param:analyzer_command(a.analyzer_exe.resolve(),f,a.analyzer_http,param if use_param else None,fems),
+            spawn,lambda:port_free(a.analyzer_http),a.output,with_param=param is not None)
+        report['online_analyzer']={'http':a.analyzer_http,'executable':str(a.analyzer_exe.resolve()),'e88_param':str(param) if param else None,'runs':follower.records}
     with socket.socket() as sock:sock.bind(('127.0.0.1',0));port=sock.getsockname()[1]
     redisconf=a.output/'redis.conf'
     redisconf.write_text(f'bind 127.0.0.1\nport {port}\nprotected-mode yes\nsave ""\nappendonly no\ndir {a.output}\n')
@@ -207,7 +230,11 @@ def main():
                 # Devices started with --id do not publish their presence key; webctl lists instances and
                 # connecting devices find their peers through it, so the launcher keeps it alive.
                 for svc in devices:r('SETEX',f'daq_service:{svc}:{svc}-{tag}:presence',120,'owned-launcher-placeholder')
-            run_webctl(a,launch,procs,logs,env,devices,inputs,setup,port,report,keep_presence)
+            def current_run():
+                try:return int(r('GET','run_info:run_number'))
+                except (subprocess.CalledProcessError,ValueError):return None
+            analyzer_poll=(lambda:follower.poll(current_run())) if follower else (lambda:None)
+            run_webctl(a,launch,procs,logs,env,devices,inputs,setup,port,report,keep_presence,analyzer_poll)
             return
         for cmd,target in [('INIT DEVICE','INITIALIZED'),('BIND','BOUND'),('CONNECT','DEVICE READY'),('INIT TASK','READY')]:drive(cmd,target)
         tftext=(a.output/'TimeFrameBuilder.log').read_text(errors='replace')
@@ -222,6 +249,7 @@ def main():
         while time.monotonic()<deadline:
             for key in devices:
                 if procs[key].poll() is not None:raise RuntimeError(f'{key} exited during capture')
+            if follower:follower.poll(a.run_number)
             time.sleep(.2)
         if a.set_hbfstate:
             hbf_off_attempted=True;hbf('off');time.sleep(1)
@@ -245,6 +273,10 @@ def main():
         elif hbf_attempted and not hbf_off_attempted:
             try:hbf_off_attempted=True;hbf('off')
             except Exception as exc:report['hbf_restore_error']=str(exc)
+        if follower:
+            try:follower.close()
+            except Exception as exc:report['online_analyzer']['close_error']=str(exc)
+            for log in analyzer_logs:log.close()
         # Only Popen objects created by this process; no process-name signalling.
         for key,proc in reversed(list(procs.items())):
             if proc.poll() is None:
@@ -262,7 +294,7 @@ def main():
                     except ValueError as exc:summaries[f.name]={'unreadable':str(exc)}
             report['side_filter_summaries']=summaries
         (a.output/'report.json').write_text(json.dumps(report,indent=2)+'\n')
-def run_webctl(a,launch,procs,logs,env,devices,inputs,setup,port,report,keep_presence):
+def run_webctl(a,launch,procs,logs,env,devices,inputs,setup,port,report,keep_presence,analyzer_poll=lambda:None):
     """Start daq-webctl with the HBF hooks and wait until the devices end or a signal arrives."""
     hook=[sys.executable,str(ROOT/'nestdaq/scripts/webctl-hook.py')]
     opts=['--output',str(a.output),'--inputs',*([] if a.replay else inputs)]
@@ -289,6 +321,8 @@ def run_webctl(a,launch,procs,logs,env,devices,inputs,setup,port,report,keep_pre
                 procs['webctl']=subprocess.Popen([str(x) for x in command],stdout=logs['webctl'],stderr=subprocess.STDOUT,env=env,cwd=ROOT)
                 print(f'WEBCTL: restarted after exit code {restarts[-1]["returncode"]}',flush=True)
             if time.monotonic()-last>30:keep_presence();last=time.monotonic()
+            try:analyzer_poll()
+            except Exception as exc:report.setdefault('online_analyzer_errors',[]).append(str(exc))
             time.sleep(.5)
         report['status']='WEBCTL_SESSION_ENDED'
     except KeyboardInterrupt as exc:

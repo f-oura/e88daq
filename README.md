@@ -46,6 +46,7 @@ Then, on the DAQ host:
 2. Build NestDAQ and the devices: [nestdaq/README.md](nestdaq/README.md).
 3. Build the board control tools: [amaneq/README.md](amaneq/README.md).
 4. Check the boards and take runs: [run-control/README.md](run-control/README.md).
+   Build the online analyzer and filters if they are used ([nestdaq/README.md](nestdaq/README.md), [online-filter/README.md](online-filter/README.md)).
 5. Check the data: [tools/README.md](tools/README.md).
 
 ## Host-specific configuration
@@ -57,4 +58,5 @@ Copy a template from `config/*.example` to `config/local/` (ignored by Git) and 
 
 Under construction. The TimeFrameBuilder chain takes any number of data sources from the setup file. It has been tested by replaying saved data
 (the B2TT receiver and one Str-HRTDC board, and an eight-source chain); live operation with these scripts is not tested yet.
-The HUL tools, run lists, and the online analyzer and filter outputs are being added.
+The online analyzer runs with a session (on the run file) and the online filters run on the TimeFrameBuilder side output;
+both have been tested by replaying saved data. The HUL tools and run lists are being added.

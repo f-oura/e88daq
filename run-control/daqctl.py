@@ -125,8 +125,9 @@ def main(argv=None):
     ap.add_argument('--webctl', metavar='ADDR:PORT', help='timeframe run controlled from daq-webctl at this address instead of a fixed --seconds capture')
     ap.add_argument('--builder', choices=['timeframe','separate-stf'], default='timeframe', help='run output topology (default: TimeFrameBuilder over every data source)')
     ap.add_argument('--sc-filter-prescale', type=int, metavar='N', help='timeframe run: also write run<NNNNNN>_sc.dat with the SC coincidence filter on the side output; N: unbiased prescale (>= 1)')
-    ap.add_argument('--e88-param', help='E88 parameter index for the SC filter (required with --sc-filter-prescale)')
+    ap.add_argument('--e88-param', help='E88 parameter index for the SC filter (required with --sc-filter-prescale) and the online analyzer')
     ap.add_argument('--prescale-filter', type=int, metavar='N', help='timeframe run: also write run<NNNNNN>_ps.dat with 1 of N time frames (plain prescale on the side output)')
+    ap.add_argument('--analyzer-http', metavar='ADDR:PORT', help='timeframe run: run the online analyzer on the run file and serve its histograms here')
     args = ap.parse_args(argv)
     out = pathlib.Path(args.out).resolve()
     out.mkdir(parents=True, exist_ok=False)
@@ -155,6 +156,10 @@ def main(argv=None):
             raise ValueError('run-number/data-dir options apply to timeframe mode only')
         if args.webctl and (args.action != 'run' or args.builder != 'timeframe'):
             raise ValueError('--webctl applies to the timeframe run only')
+        if args.analyzer_http and (args.action != 'run' or args.builder != 'timeframe'):
+            raise ValueError('--analyzer-http applies to the timeframe run only')
+        if args.analyzer_http:
+            result['online_analyzer'] = {'http': args.analyzer_http, 'e88_param': args.e88_param}
         if args.sc_filter_prescale is not None or args.prescale_filter is not None:
             if args.action != 'run' or args.builder != 'timeframe':
                 raise ValueError('side-output filters apply to the timeframe run only')
@@ -197,6 +202,10 @@ def main(argv=None):
                     cmd += ['--sc-filter-prescale', str(args.sc_filter_prescale), '--e88-param', args.e88_param]
                 if args.prescale_filter is not None:
                     cmd += ['--prescale-filter', str(args.prescale_filter)]
+                if args.analyzer_http:
+                    cmd += ['--analyzer-http', args.analyzer_http]
+                    if args.e88_param and args.sc_filter_prescale is None:
+                        cmd += ['--e88-param', args.e88_param]
             else:
                 cmd = [sys.executable, str(ROOT/'nestdaq/scripts/run-separate-stf.py'), '--root', root['endpoint'], '--set-hbfstate', args.set_hbfstate, '--on', str(args.seconds), '--summary', str(out/'capture.json')]
                 for name, board in boards.items():

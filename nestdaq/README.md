@@ -48,14 +48,33 @@ Normally these are started by `run-control/daqctl.py`, not by hand.
     RUN and STOP: after RUN it waits until every sampler has connected and then switches the root HBF on; before STOP it switches it off.
     The session ends when every device has exited (END) or on Ctrl-C/SIGTERM, and the HBF is switched off then as well.
     Hook results are in `hooks.jsonl` in the output directory. Bind to 127.0.0.1 and reach it through an SSH tunnel
-    or the password-protected portal proxy (`../web/deploy-daq-webctl.sh`).
+    or the password-protected proxy of the experiment portal.
     `daq-webctl` aborts when a browser drops its WebSocket abruptly; it keeps no state of its own, so the launcher restarts it
     (recorded as `webctl_restarts` in `report.json`) and the devices and the run continue.
+  - `--analyzer-http ADDR:PORT` runs the online analyzer (`../online-analyzer`, `nda-replay --follow`) on the run file being
+    written and serves its histograms at that address. It only reads the file, at a lower priority than the DAQ processes, so it
+    cannot slow the DAQ down. A new run file (a new run number at RUN) gets a new analyzer; the last one keeps serving until the
+    next run or the end of the session. If it fails with the E88 parameters (`--e88-param`), it is restarted once without them.
+    A failing analyzer or a port in use is recorded in `online_analyzer` of `report.json` and never stops the run.
+    The analyzer does not answer HTTP while it waits for new data (before the first time frame of a run, in pauses, after STOP).
   - Every invocation starts its own Redis on 127.0.0.1 (with the RedisTimeSeries module that TimeFrameBuilder needs for metrics)
     and stops only the processes it started.
 - `scripts/run-board-chain.sh` — one board: `AmQStrTdcSampler` → `STFBuilder` → `FileSink`.
 - `scripts/run-separate-stf.py` — one `run-board-chain.sh` per board and one shared HBF window from the root
   (the older layout with a separate file per board).
+
+## Online analyzer
+
+The online analyzer is the pinned submodule `../online-analyzer`. Build it in `build/online-analyzer` (both executables;
+`nda-online-monitor` needs FairMQ from the NestDAQ prefix):
+
+```bash
+set -a; . config/local/nestdaq.env; set +a
+cmake -S online-analyzer -B build/online-analyzer -DNDA_BUILD_DEVICES=ON \
+      -DCMAKE_PREFIX_PATH="$NESTDDAQ_PREFIX" -DBOOST_ROOT="$NESTDDAQ_PREFIX"
+cmake --build build/online-analyzer -j
+E88PARAM_DIR=<e88param> ctest --test-dir build/online-analyzer
+```
 
 ## Devices
 

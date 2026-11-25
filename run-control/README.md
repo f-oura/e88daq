@@ -33,7 +33,11 @@ run-control/daqctl.py run     --reader "$READER" --writer "$WRITER" --set-hbfsta
   kept by the SC coincidence filter on the TimeFrameBuilder side output (`../online-filter`), with an unbiased prescale of 1 in N.
   `run --prescale-filter N` writes `runXXXXXX_ps.dat` with the plain prescale (1 of N time frames) instead.
   Build the filter first (`../online-filter/README.md`).
-- `session-server.py` serves a small page (loopback only, behind the password-protected proxy in `../web/`) that starts
+- `run --analyzer-http 127.0.0.1:<port>` (timeframe run) also runs the online analyzer (`../online-analyzer`) and serves its
+  histograms there (ROOT THttpServer / JSROOT). It follows the run file being written (`nda-replay --follow`), so it never
+  slows the DAQ down; each new run file gets a new analyzer, and the last one keeps serving until the session ends.
+  `--e88-param` gives it the E88 parameters as well. Build the analyzer first (`../nestdaq/README.md`).
+- `session-server.py` serves a small page (loopback only, behind the password-protected proxy of the experiment portal) that starts
   such a `--webctl` session with an explicit run number and shows the result of the last one. Before starting it checks that
   no session or other board-touching process is running and that the run file does not exist. The command it runs is set in
   `config/local/session.env` (template: `config/session.env.example`).

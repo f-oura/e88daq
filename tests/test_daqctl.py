@@ -146,6 +146,25 @@ class WebctlTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d, patch.object(m,'inspect') as inspect, patch.object(m,'capture_with_receiver_output') as capture:
             rc=m.main(SETUP+['run','--reader','/r','--writer','/w','--set-hbfstate','/h','--run-number','42','--data-dir',d,'--out',d+'/run','--prescale-filter','100','--sc-filter-prescale','100','--e88-param','/p'])
             self.assertEqual(rc,2);inspect.assert_not_called();capture.assert_not_called()
+    def run_with(self, extra):
+        with tempfile.TemporaryDirectory() as d, patch.object(m,'inspect',return_value={'linked':True,'ready':True}), patch.object(m,'read',return_value=0), patch.object(m,'capture_with_receiver_output') as capture:
+            rc=m.main(SETUP+['run','--reader','/r','--writer','/w','--set-hbfstate','/h','--run-number','42','--data-dir',d,'--out',d+'/run']+extra)
+            self.assertEqual(rc,0)
+            return capture.call_args.args[4]
+    def test_analyzer_passed_to_timeframe_chain(self):
+        cmd=self.run_with(['--webctl','127.0.0.1:8080','--analyzer-http','127.0.0.1:18090','--e88-param','/p/index.txt'])
+        self.assertEqual(cmd[cmd.index('--analyzer-http')+1],'127.0.0.1:18090')
+        self.assertEqual(cmd[cmd.index('--e88-param')+1],'/p/index.txt')
+    def test_analyzer_with_sc_filter_shares_the_parameters(self):
+        cmd=self.run_with(['--analyzer-http','127.0.0.1:18090','--sc-filter-prescale','100','--e88-param','/p/index.txt'])
+        self.assertEqual(cmd.count('--e88-param'),1);self.assertIn('--analyzer-http',cmd)
+    def test_analyzer_without_parameters(self):
+        cmd=self.run_with(['--analyzer-http','127.0.0.1:18090'])
+        self.assertIn('--analyzer-http',cmd);self.assertNotIn('--e88-param',cmd)
+    def test_analyzer_rejected_outside_timeframe_run(self):
+        with tempfile.TemporaryDirectory() as d, patch.object(m,'inspect') as inspect, patch.object(m,'capture_with_receiver_output') as capture:
+            rc=m.main(SETUP+['run','--reader','/r','--writer','/w','--set-hbfstate','/h','--out',d+'/run','--builder','separate-stf','--analyzer-http','127.0.0.1:18090'])
+            self.assertEqual(rc,2);inspect.assert_not_called();capture.assert_not_called()
     def test_webctl_rejected_outside_timeframe_run(self):
         with tempfile.TemporaryDirectory() as d, patch.object(m,'inspect') as inspect:
             rc=m.main(SETUP+['status','--reader','/r','--out',d+'/s','--webctl','127.0.0.1:8080'])
