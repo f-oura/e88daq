@@ -178,6 +178,8 @@
         #recording.nofile { background: #f8d7da; border-color: #c82333; color: #721c24; }
         #recording.warn { background: #fff3cd; border-color: #eab000; color: #6b4f00; }
         #recording.unknown { background: #eee; border-color: #999; color: #333; }
+        #run-comment { width: 420px; font-weight: 700; }
+        #comment-current { font-size: 12px; margin-top: 4px; }
         #filter-card select, #filter-card input[type=number] { font-size: 12px; font-weight: 800; padding: 3px; width: auto; }
         #filter-card input[type=number] { width: 90px; }
         
@@ -226,6 +228,14 @@
                     <label class="label-normal" style="margin-left:10px;">
                     <input type="checkbox" id="run-number-auto-increment-checkbox" checked/> Auto increment </label>
                 </form>
+
+                <form class="flex-row" style="margin-top: 6px;" onsubmit="return ApplyRunComment()">
+                    <strong>Comment:</strong>
+                    <input type="text" id="run-comment" maxlength="255" placeholder="written into the run file at the next RUN"/>
+                    <input type="submit" id="run-comment-set" value="SET"/>
+                    <span id="comment-message"></span>
+                </form>
+                <div id="comment-current">Comment for the next RUN: </div>
 
                 <div class="run-monitor">
                     <div id="next_run_number">Next : </div>
@@ -603,6 +613,43 @@
             return false;
         }
 
+        // Run comment (run_info:run_comment): the FileSink writes it into the run file at RUN.
+        let commentEdited = false;
+        document.getElementById('run-comment').addEventListener('input', () => { commentEdited = true; });
+
+        function EscapeHtml(t) {
+            return String(t).replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+        }
+
+        function ShowRunComment(j) {
+            const input = document.getElementById('run-comment'), set = document.getElementById('run-comment-set');
+            const usable = !!(j && j.available);
+            input.disabled = set.disabled = !usable;
+            const cur = document.getElementById('comment-current');
+            if (!j) { cur.innerHTML = 'Comment: the session page cannot be reached from here.'; return; }
+            if (!usable) { cur.innerHTML = 'Comment: not available (' + EscapeHtml(j.reason || '') + ').'; return; }
+            cur.innerHTML = 'Comment for the next RUN: ' + (j.comment ? '<b>' + EscapeHtml(j.comment) + '</b>' : '<i>(none)</i>');
+            if (document.activeElement !== input && !commentEdited) input.value = j.comment;
+        }
+
+        function PollRunComment() {
+            fetch('session/run-comment.json', { cache: 'no-store' })
+                .then(r => r.ok ? r.json() : null).catch(() => null).then(ShowRunComment);
+        }
+
+        function ApplyRunComment() {
+            const msg = document.getElementById('comment-message');
+            fetch('session/run-comment', { method: 'POST', body: new URLSearchParams({ comment: document.getElementById('run-comment').value }) })
+                .then(r => r.json().then(j => ({ ok: r.ok, j })))
+                .then(({ ok, j }) => {
+                    msg.innerHTML = ok ? 'Set: used from the next RUN.' : 'Not set: ' + EscapeHtml(j.error);
+                    if (ok) { commentEdited = false; ShowRunComment(j); }
+                })
+                .catch(e => { msg.innerHTML = 'Not set: ' + EscapeHtml(e); });
+            return false;
+        }
+
+        PollRunComment(); setInterval(PollRunComment, 5000);
         PollRecording(); setInterval(PollRecording, 2000);
         PollFilterSettings(); setInterval(PollFilterSettings, 5000);
     </script>

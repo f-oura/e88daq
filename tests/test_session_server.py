@@ -10,6 +10,9 @@ from unittest.mock import patch
 spec = importlib.util.spec_from_file_location('session_server', pathlib.Path(__file__).resolve().parents[1] / 'run-control' / 'session-server.py')
 m = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(m)
+import sys
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from fake_redis import FakeRedis  # noqa: E402
 
 
 class SessionCommandTests(unittest.TestCase):
@@ -120,6 +123,33 @@ class ControllerApiTests(unittest.TestCase):
                 self.assertFalse(r['available']); self.assertIn('runs no side-output filter', r['reason'])
             finally:
                 s.proc.kill(); s.proc.wait()
+
+
+class RunCommentTests(unittest.TestCase):
+    def test_clean(self):
+        self.assertEqual(m.clean_comment('  SC HV 1500 V\r\nthreshold 30 mV\t '), 'SC HV 1500 V threshold 30 mV')
+        self.assertEqual(m.clean_comment('é' * 127), 'é' * 127)  # 254 bytes
+        with self.assertRaises(ValueError):
+            m.clean_comment('é' * 128)  # 256 bytes
+        with self.assertRaises(ValueError):
+            m.clean_comment('bell\x07')
+
+    def test_comment_in_session_redis(self):
+        r = FakeRedis()
+        with tempfile.TemporaryDirectory() as d:
+            s, out = ControllerApiTests.session(None, d, with_settings=False)
+            try:
+                (out / 'timeframe' / 'redis.conf').write_text(f'bind 127.0.0.1\nport {r.port}\n')
+                self.assertEqual(s.get_comment(), {'available': True, 'comment': ''})
+                self.assertEqual(s.set_comment('beam on, SC HV 1500 V')['comment'], 'beam on, SC HV 1500 V')
+                self.assertEqual(r.data[b'run_info:run_comment'], b'beam on, SC HV 1500 V')
+                with self.assertRaises(ValueError):
+                    s.set_comment('x' * 256)
+                self.assertEqual(len((out / 'run-comments.jsonl').read_text().splitlines()), 1)
+            finally:
+                s.proc.kill(); s.proc.wait(); r.close()
+            time.sleep(0.2)
+            self.assertFalse(s.get_comment()['available'])
 
 
 if __name__ == '__main__':

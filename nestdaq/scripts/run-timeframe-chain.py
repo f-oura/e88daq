@@ -376,7 +376,7 @@ def main():
 def run_webctl(a,launch,procs,logs,env,devices,inputs,setup,port,report,keep_presence,analyzer_poll=lambda:None,optional=()):
     """Start daq-webctl with the HBF hooks and wait until the devices end or a signal arrives."""
     hook=[sys.executable,str(ROOT/'nestdaq/scripts/webctl-hook.py')]
-    opts=['--output',str(a.output),'--inputs',*([] if a.replay else inputs)]
+    opts=['--output',str(a.output),'--redis-port',str(port),'--inputs',*([] if a.replay else inputs)]
     if a.set_hbfstate:opts+=['--set-hbfstate',str(a.set_hbfstate.resolve()),'--root',setup['timing_root']['endpoint']]
     hooks={f'--{e}':shlex.join(hook+[e]+opts) for e in ['pre-run','post-run','pre-stop','post-stop']}
     command=[a.prefix/'bin/daq-webctl','--http-uri',f'http://{a.webctl}','--redis-uri',f'tcp://127.0.0.1:{port}/0']

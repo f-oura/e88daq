@@ -8,12 +8,29 @@ post-stop record only
 
 Without --set-hbfstate (replay) the hook only records. Every call appends one JSON line
 to <output>/hooks.jsonl. A failed HBF switch is recorded and never retried.
+With --redis-port (the session Redis) the post-run record also holds the run number and the run comment
+(run_info:run_number, run_info:run_comment), so every RUN of the session is listed with its comment.
 """
 import argparse
 import json
 import subprocess
+import sys
 import time
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'lib'))
+import redis_lite  # noqa: E402
+
+
+def run_info(port, record):
+    """Run number and comment of the session Redis; a failure is recorded, never raised."""
+    try:
+        number = redis_lite.command(port, 'GET', 'run_info:run_number')
+        comment = redis_lite.command(port, 'GET', 'run_info:run_comment')
+        record['run_number'] = int(number) if number is not None else None
+        record['run_comment'] = comment.decode(errors='replace') if comment is not None else ''
+    except Exception as exc:  # noqa: BLE001 - the run must go on
+        record['run_info_error'] = str(exc)
 
 
 def tcp_counts(output, inputs):
@@ -41,6 +58,7 @@ def main():
     p.add_argument('--set-hbfstate')
     p.add_argument('--root')
     p.add_argument('--tcp-timeout', type=float, default=15)
+    p.add_argument('--redis-port', type=int, help='session Redis on 127.0.0.1: record the run number and comment at post-run')
     a = p.parse_args()
     state_file = a.output / 'hook-state.json'
     record = {'event': a.event, 'time': time.time()}
@@ -70,6 +88,8 @@ def main():
     except Exception as exc:
         record['status'] = 'FAILED'
         record['error'] = str(exc)
+    if a.event == 'post-run' and a.redis_port:
+        run_info(a.redis_port, record)
     with open(a.output / 'hooks.jsonl', 'a') as f:
         f.write(json.dumps(record) + '\n')
     print(f"#{'D' if record['status'] == 'OK' else 'E'}: webctl hook {a.event}: {record.get('error', 'ok')}", flush=True)

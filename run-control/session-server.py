@@ -17,6 +17,9 @@ For the controller page of the running session (nestdaq/webctl/daq-webctl.html, 
   GET  recording.json         whether the session writes run files, and the newest runNNNNNN.dat it wrote (name, size)
   GET  run-settings.json      settings of the side-output filter for the next RUN
   POST run-settings           kind (sc, prescale, off) and prescale (N) for the next RUN
+  GET  run-comment.json       the run comment (run_info:run_comment in the session Redis)
+  POST run-comment            set the run comment; the FileSink writes it into the header and trailer of the run file
+                              at the next RUN, and the run hook records it in hooks.jsonl
 """
 import argparse
 import html
@@ -35,7 +38,21 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'nestdaq/lib'))
+import redis_lite  # noqa: E402
 import run_settings  # noqa: E402
+
+COMMENT_KEY = 'run_info:run_comment'
+COMMENT_BYTES = 255  # the FileSink keeps 255 bytes (header and trailer field of 256 bytes)
+
+
+def clean_comment(text):
+    """One line of at most 255 bytes (UTF-8); line breaks and tabs become spaces, other control characters are refused."""
+    text = ' '.join(text.replace('\t', ' ').splitlines()).strip()
+    if any(ord(c) < 32 or ord(c) == 127 for c in text):
+        raise ValueError('the comment contains control characters')
+    if len(text.encode()) > COMMENT_BYTES:
+        raise ValueError(f'the comment is longer than {COMMENT_BYTES} bytes ({len(text.encode())})')
+    return text
 BUSY = re.compile(r'(daqctl\.py|run-timeframe-chain\.py|run-board-chain\.sh|run-separate-stf\.py|AmQStrTdcSampler|'
                   r'/write_register|/set_hbfstate|/initialize|daq-webctl)(\s|$)')
 
@@ -192,6 +209,38 @@ class Sessions:
                 f.write(json.dumps({'time': time.time(), 'kind': kind, 'prescale': prescale}) + '\n')
         return self.get_settings()
 
+    def redis_port(self):
+        s = self.state()
+        if not s.get('running') or not s.get('out'):
+            return None
+        try:
+            return redis_lite.chain_port(Path(s['out']) / 'timeframe')
+        except (OSError, redis_lite.RedisError):
+            return None  # the chain has not started its Redis yet
+
+    def get_comment(self):
+        port = self.redis_port()
+        if port is None:
+            return {'available': False, 'reason': 'no session with a running DAQ chain'}
+        try:
+            value = redis_lite.command(port, 'GET', COMMENT_KEY)
+        except (OSError, redis_lite.RedisError) as exc:
+            return {'available': False, 'reason': f'session Redis not reachable: {exc}'}
+        return {'available': True, 'comment': value.decode(errors='replace') if value is not None else ''}
+
+    def set_comment(self, text):
+        text = clean_comment(text)
+        with self.lock:
+            port = self.redis_port()
+            if port is None:
+                raise ValueError('no session with a running DAQ chain')
+            reply = redis_lite.command(port, 'SET', COMMENT_KEY, text.encode())
+            if reply != 'OK':
+                raise ValueError(f'unexpected reply from the session Redis: {reply!r}')
+            with open(Path(self.state()['out']) / 'run-comments.jsonl', 'a') as f:
+                f.write(json.dumps({'time': time.time(), 'comment': text}) + '\n')
+        return self.get_comment()
+
     def _watch(self, proc, log):
         proc.wait()
         log.close()
@@ -281,22 +330,30 @@ class Handler(BaseHTTPRequestHandler):
             self.send(200, json.dumps(self.sessions.recording()), 'application/json')
         elif path == '/run-settings.json':
             self.send(200, json.dumps(self.sessions.get_settings()), 'application/json')
+        elif path == '/run-comment.json':
+            self.send(200, json.dumps(self.sessions.get_comment()), 'application/json')
         else:
             self.send(404, 'not found', 'text/plain')
 
     def do_POST(self):
         path = urllib.parse.urlsplit(self.path).path
-        if path not in ('/start', '/run-settings'):
+        if path not in ('/start', '/run-settings', '/run-comment'):
             return self.send(404, 'not found', 'text/plain')
         # Only accept requests from these pages (same host), not from other sites.
         origin = self.headers.get('Origin') or self.headers.get('Referer') or ''
         host = self.headers.get('X-Forwarded-Host') or self.headers.get('Host') or ''
         if urllib.parse.urlsplit(origin).netloc != host:
-            if path == '/run-settings':
+            if path in ('/run-settings', '/run-comment'):
                 return self.send(403, json.dumps({'error': 'the request did not come from this page'}), 'application/json')
             return self.send(403, render(self.sessions, 'Refused: the request did not come from this page.'))
         length = int(self.headers.get('Content-Length') or 0)
-        form = urllib.parse.parse_qs(self.rfile.read(min(length, 4096)).decode())
+        form = urllib.parse.parse_qs(self.rfile.read(min(length, 4096)).decode(), keep_blank_values=True)
+        if path == '/run-comment':
+            try:
+                result = self.sessions.set_comment(form.get('comment', [''])[0])
+            except (ValueError, OSError, redis_lite.RedisError) as exc:
+                return self.send(409, json.dumps({'error': str(exc)}), 'application/json')
+            return self.send(200, json.dumps(result), 'application/json')
         if path == '/run-settings':
             try:
                 kind = form.get('kind', [''])[0]

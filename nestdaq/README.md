@@ -49,11 +49,13 @@ Normally these are started by `run-control/daqctl.py`, not by hand.
     RUN, STOP, the run number, and END to the browser (`http://ADDR:PORT/daq-webctl.html`). The page is `webctl/daq-webctl.html` of this
     directory (given with `--doc-root`; based on the NestDAQ page, MIT License in `webctl/LICENSE-nestdaq`): it colours the cell of the
     current state of each service, shows whether the session saves data (the newest run file and its size, or "NOT SAVING DATA" for a
-    `--no-file` session), and sets the side-output filter for the next RUN. The last two use the session page
+    `--no-file` session), sets the side-output filter for the next RUN, and sets the run comment. The last three use the session page
     (`../run-control/session-server.py`) under the same proxy and show "unknown" when it cannot be reached. `scripts/webctl-hook.py` runs around
     RUN and STOP: after RUN it waits until every sampler has connected and then switches the root HBF on; before STOP it switches it off.
     The session ends when every device has exited (END) or on Ctrl-C/SIGTERM, and the HBF is switched off then as well.
-    Hook results are in `hooks.jsonl` in the output directory. Bind to 127.0.0.1 and reach it through an SSH tunnel
+    Hook results are in `hooks.jsonl` in the output directory; the post-run record also holds the run number and the run comment.
+    The run comment is the Redis key `run_info:run_comment` of the session: the FileSink writes it into the header and trailer of
+    the run file at RUN (at most 255 bytes). daq-webctl itself cannot set it, so the controller page sets it through the session page. Bind to 127.0.0.1 and reach it through an SSH tunnel
     or the password-protected proxy of the experiment portal.
     `daq-webctl` aborts when a browser drops its WebSocket abruptly; it keeps no state of its own, so the launcher restarts it
     (recorded as `webctl_restarts` in `report.json`) and the devices and the run continue.
