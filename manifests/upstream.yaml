@@ -23,6 +23,10 @@ upstream:
     url: https://github.com/spadi-alliance/amaneq-soft.git
     commit: 86fef97ccc4e6488739e2d8b549a1c5bddd3542e
     status: candidate
+  hul-trigger:
+    url: https://github.com/jparc-saphire/hul-trigger.git
+    commit: d733c582595e14e85e27f5bc7550810f74f76500
+    status: candidate
 submodules:
   online-analyzer:
     url: https://github.com/jparc-saphire/NestdaqAnalyzer.git
