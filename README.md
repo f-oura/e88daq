@@ -43,9 +43,9 @@ git clone --recurse-submodules <repository URL> e88daq
 
 Then, on the DAQ host:
 
-1. Copy `config/local.env.example` and `config/setup.yaml.example` to `config/local/` and fill them in.
+1. Copy `config/local.env.example`, `config/setup.yaml.example`, and `config/hul-trigger.env.example` to `config/local/` and fill them in.
 2. Build NestDAQ and the devices: [nestdaq/README.md](nestdaq/README.md).
-3. Build the board control tools: [amaneq/README.md](amaneq/README.md).
+3. Build the board control tools: [amaneq/README.md](amaneq/README.md) and [hul/trigger/README.md](hul/trigger/README.md).
 4. Check the boards and take runs: [run-control/README.md](run-control/README.md).
    Build the online analyzer and filters if they are used ([nestdaq/README.md](nestdaq/README.md), [online-filter/README.md](online-filter/README.md)).
 5. Check the data: [tools/README.md](tools/README.md).
@@ -60,4 +60,5 @@ Copy a template from `config/*.example` to `config/local/` (ignored by Git) and 
 Under construction. The TimeFrameBuilder chain takes any number of data sources from the setup file. It has been tested by replaying saved data
 (the B2TT receiver and one Str-HRTDC board, and an eight-source chain); live operation with these scripts is not tested yet.
 The online analyzer runs with a session (on the run file, or on the data stream when no file is written) and the online filters
-run on the TimeFrameBuilder side output; both have been tested by replaying saved data. The HUL tools and run lists are being added.
+run on the TimeFrameBuilder side output; both have been tested by replaying saved data. The HUL trigger tools write and read back the registers; they have been tested against a loopback responder and on the board, where every read-back value matched.
+The 2D matrix tools and run lists are being added.
