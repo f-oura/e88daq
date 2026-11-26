@@ -37,13 +37,33 @@ def read(reader, ip, address, width, events):
     return int(values[0], 16)
 
 
+def stale_neighbor(text):
+    """True when the neighbor entry is missing or not usable (FAILED, INCOMPLETE)."""
+    return not text.strip() or any(state in text for state in ('FAILED', 'INCOMPLETE'))
+
+
+def probe(ip, events):
+    """One ping so the kernel resolves the neighbor again. Its result is recorded but not judged."""
+    event = {'time': time.time(), 'command': ['ping', '-c', '1', '-W', '1', ip]}
+    events.append(event)
+    try:
+        p = subprocess.run(event['command'], capture_output=True, text=True, timeout=5)
+        event.update(rc=p.returncode, output=p.stdout + p.stderr)
+    except Exception as exc:  # noqa: BLE001 - the neighbor check that follows decides
+        event.update(rc=None, error=str(exc))
+
+
 def inspect(board, reader, events):
     ip = board['endpoint']
     route = invoke(['ip', 'route', 'get', ip], events)
     if ('dev ' + board['interface']) not in route or ('src ' + board['source']) not in route:
         raise RuntimeError('route/source mismatch for ' + ip)
     neighbor = invoke(['ip', 'neigh', 'show', ip], events)
-    if board['mac'].lower() not in neighbor.lower() or any(s in neighbor for s in ['FAILED', 'INCOMPLETE']):
+    if stale_neighbor(neighbor):
+        # A FAILED entry (left while the board was off) stays until traffic is sent: probe once and look again.
+        probe(ip, events)
+        neighbor = invoke(['ip', 'neigh', 'show', ip], events)
+    if board['mac'].lower() not in neighbor.lower() or stale_neighbor(neighbor):
         raise RuntimeError('neighbor identity unavailable for ' + ip)
     identity = read(reader, ip, board['identity_address'], 4, events)
     if identity != board['identity_value']:

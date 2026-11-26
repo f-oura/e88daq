@@ -27,6 +27,35 @@ class ReadinessTests(unittest.TestCase):
         with patch.object(m,'invoke',return_value='#D: Read register: 4008636142 (0xeeeeeeee)'):
             with self.assertRaises(RuntimeError):m.read('reader','ip',0,1,[])
 
+class NeighborTests(unittest.TestCase):
+    BOARD = {'endpoint': '10.0.0.5', 'interface': 'daq0', 'source': '10.0.0.1', 'mac': 'aa:bb:cc:dd:ee:ff',
+             'identity_address': 0, 'identity_value': 1, 'link_mask': 1, 'role': 'root', 'serial': 'S'}
+    ROUTE = '10.0.0.5 dev daq0 src 10.0.0.1'
+
+    def run_inspect(self, neighbors):
+        outputs = iter([self.ROUTE] + neighbors)
+        with patch.object(m, 'invoke', side_effect=lambda cmd, events, timeout=10: next(outputs)), \
+                patch.object(m, 'probe') as probe, patch.object(m, 'read', return_value=1):
+            try:
+                return m.inspect(self.BOARD, 'reader', []), probe.call_count
+            except RuntimeError as exc:
+                return str(exc), probe.call_count
+
+    def test_reachable_needs_no_probe(self):
+        row, probes = self.run_inspect(['10.0.0.5 dev daq0 lladdr aa:bb:cc:dd:ee:ff REACHABLE'])
+        self.assertEqual((row['linked'], probes), (True, 0))
+
+    def test_failed_entry_is_probed_once(self):
+        row, probes = self.run_inspect(['10.0.0.5 dev daq0 FAILED', '10.0.0.5 dev daq0 lladdr aa:bb:cc:dd:ee:ff REACHABLE'])
+        self.assertEqual((row['linked'], probes), (True, 1))
+
+    def test_still_failed_or_wrong_mac_stops(self):
+        msg, probes = self.run_inspect(['10.0.0.5 dev daq0 FAILED', '10.0.0.5 dev daq0 FAILED'])
+        self.assertIn('neighbor identity unavailable', msg); self.assertEqual(probes, 1)
+        msg, _ = self.run_inspect(['10.0.0.5 dev daq0 lladdr 11:22:33:44:55:66 REACHABLE'])
+        self.assertIn('neighbor identity unavailable', msg)
+
+
 class OutputTests(unittest.TestCase):
     def test_enable_and_restore(self):
         with patch.object(m,'read',side_effect=[0,4,0,0]), patch.object(m,'invoke') as call:

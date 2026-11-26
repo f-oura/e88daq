@@ -21,6 +21,7 @@ run-control/daqctl.py run     --reader "$READER" --writer "$WRITER" --set-hbfsta
   A board whose `link_mask` is `null` is reported but never counts as linked, so `status` shows its link registers and `prepare`/`run` stop.
 - `status` checks for every board: the host route and MAC, the firmware identity, the links, and for HR-TDC the receiver enable and DDR alignment.
   It also checks that the root HBF is off.
+  A missing or FAILED neighbor entry (for example left while a board was off) is probed once with `ping` and checked again.
 - `prepare` runs `initialize` only on HR-TDC boards that are not ready, and checks the success messages and the state afterwards.
   After power-up or a reset, run `status` and, if needed, `prepare`.
 - `run` requires every board ready and the root HBF off. It enables the Receiver record output (and restores it afterwards),
