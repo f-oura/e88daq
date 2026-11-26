@@ -50,6 +50,62 @@ class StartTests(unittest.TestCase):
             self.assertTrue(log.strip().endswith('--no-file'))
 
 
+class PrepareTests(unittest.TestCase):
+    REPORT = {'action': 'prepare', 'result': 'FAIL_STOP', 'error': 'hrtdc31 initialize failed',
+              'boards': {'root': {'ready': True}, 'hrtdc30': {'ready': True}, 'hrtdc31': {'ready': False}}}
+
+    def sessions(self, d, command):
+        env = {'SESSION_OUT_BASE': f'{d}/out', 'SESSION_DATA_DIR': d, 'SESSION_WEBCTL': '127.0.0.1:1',
+               'SESSION_COMMAND': 'sleep 30'}
+        if command is not None:
+            env['SESSION_PREPARE_COMMAND'] = command
+        return m.Sessions(env, None)
+
+    def test_prepare_runs_and_reports(self):
+        with tempfile.TemporaryDirectory() as d, patch.object(m, 'busy_processes', return_value=[]), \
+                patch.object(m, 'listening', return_value=False):
+            report = json.dumps(self.REPORT).replace("'", "'\\''")
+            s = self.sessions(d, f"sleep 0.3; mkdir -p {{out}}; echo '{report}' > {{out}}/report.json")
+            proc = s.prepare()
+            self.assertTrue(s.prepare_state()['running'])
+            self.assertIn('Preparing the boards', m.render(s))
+            with self.assertRaises(ValueError):
+                s.prepare()  # already running
+            with self.assertRaises(ValueError):
+                s.start(5)  # no session while the boards are prepared
+            proc.wait()
+            time.sleep(0.2)
+            st = s.prepare_state()
+            self.assertFalse(st['running'])
+            self.assertEqual(st['report'], {'result': 'FAIL_STOP', 'error': 'hrtdc31 initialize failed',
+                                            'not_ready': ['hrtdc31'], 'boards': 3})
+            page = m.render(s)
+            self.assertIn('Prepare boards', page)
+            self.assertIn('Not READY: hrtdc31', page)
+            rows = [json.loads(x) for x in (pathlib.Path(d) / 'out' / 'sessions.jsonl').read_text().splitlines()]
+            self.assertEqual(rows[-1]['action'], 'prepare')
+            self.assertTrue(st['out'].endswith('-prepare'))
+
+    def test_refused_while_a_session_runs(self):
+        with tempfile.TemporaryDirectory() as d, patch.object(m, 'busy_processes', return_value=[]), \
+                patch.object(m, 'listening', return_value=False):
+            s = self.sessions(d, 'true')
+            s.start(7)
+            try:
+                with self.assertRaises(ValueError):
+                    s.prepare()
+                self.assertNotIn('action="prepare"', m.render(s))
+            finally:
+                s.proc.kill(); s.proc.wait()
+
+    def test_no_button_without_command(self):
+        with tempfile.TemporaryDirectory() as d, patch.object(m, 'listening', return_value=False):
+            s = self.sessions(d, None)
+            self.assertNotIn('action="prepare"', m.render(s))
+            with self.assertRaises(ValueError):
+                s.prepare()
+
+
 class ControllerApiTests(unittest.TestCase):
     def session(self, d, no_file=False, with_settings=True):
         env = {'SESSION_OUT_BASE': f'{d}/out', 'SESSION_DATA_DIR': f'{d}/data', 'SESSION_WEBCTL': '127.0.0.1:1',

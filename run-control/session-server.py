@@ -12,6 +12,8 @@ Configuration (a bash file, see config/session.env.example):
   SESSION_OUT_BASE  directory for one evidence directory per session
   SESSION_DATA_DIR  directory of runXXXXXX.dat files
   SESSION_WEBCTL    host:port where the session's daq-webctl listens
+  SESSION_PREPARE_COMMAND  (optional) command run through bash by the Prepare boards button; {out} is substituted.
+                    Usually daqctl.py prepare, which initializes only the boards that are not READY
 
 For the controller page of the running session (nestdaq/webctl/daq-webctl.html, served under the same proxy):
   GET  recording.json         whether the session writes run files, and the newest runNNNNNN.dat it wrote (name, size)
@@ -106,6 +108,7 @@ class Sessions:
         self.lock = threading.Lock()
         self.proc = None
         self.current = self.base / 'current.json'
+        self.prepare_file = self.base / 'prepare.json'
 
     def state(self):
         info = json.loads(self.current.read_text()) if self.current.exists() else {}
@@ -123,6 +126,53 @@ class Sessions:
         info['controller_up'] = alive and listening(self.env['SESSION_WEBCTL'])
         return info
 
+    def prepare_command(self):
+        return self.env.get('SESSION_PREPARE_COMMAND', '')
+
+    def prepare_state(self):
+        """The last Prepare boards run: running, result, and the boards that are not READY."""
+        info = json.loads(self.prepare_file.read_text()) if self.prepare_file.exists() else {}
+        alive = bool(info.get('pid')) and info.get('ended') is None and Path(f"/proc/{info['pid']}").exists()
+        if info and not alive and info.get('ended') is None:
+            info['ended'] = time.time()
+            self.prepare_file.write_text(json.dumps(info))
+        if info.get('ended') is not None and 'report' not in info:
+            report = Path(info['out']) / 'report.json'
+            if report.exists():
+                r = json.loads(report.read_text())
+                boards = r.get('boards') or {}
+                info['report'] = {'result': r.get('result'), 'error': r.get('error'),
+                                  'not_ready': [name for name, b in boards.items() if not b.get('ready')],
+                                  'boards': len(boards)}
+                self.prepare_file.write_text(json.dumps(info))
+        info['running'] = alive
+        return info
+
+    def prepare(self):
+        with self.lock:
+            if not self.prepare_command():
+                raise ValueError('SESSION_PREPARE_COMMAND is not set')
+            if self.state().get('running'):
+                raise ValueError('a session is running; end it first')
+            if self.prepare_state().get('running'):
+                raise ValueError('the boards are already being prepared')
+            busy = busy_processes()
+            if busy:
+                raise ValueError('other DAQ or board processes are running: ' + '; '.join(busy))
+            out = self.base / time.strftime('%Y%m%d-%H%M%S-prepare')
+            command = self.prepare_command().replace('{out}', shlex.quote(str(out)))
+            log = open(self.base / f'{out.name}.log', 'w')
+            proc = subprocess.Popen(['bash', '-c', command], cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
+                                    start_new_session=True, env={**os.environ, **self.env})
+            info = {'pid': proc.pid, 'out': str(out), 'log': log.name, 'command': command, 'started': time.time(),
+                    'ended': None}
+            self.prepare_file.write_text(json.dumps(info))
+            threading.Thread(target=self._watch, args=(proc, log, self.prepare_file), daemon=True).start()
+            with open(self.base / 'sessions.jsonl', 'a') as f:
+                f.write(json.dumps({'action': 'prepare', 'out': str(out), 'started': info['started'],
+                                    'command': command}) + '\n')
+        return proc
+
     def next_run_number(self):
         numbers = [int(m.group(1)) for p in self.data.glob('run*.dat') if (m := re.fullmatch(r'run(\d{6})\.dat', p.name))]
         return max(numbers, default=0) + 1
@@ -131,6 +181,8 @@ class Sessions:
         with self.lock:
             if self.state().get('running'):
                 raise ValueError('a session is already running')
+            if self.prepare_state().get('running'):
+                raise ValueError('the boards are being prepared; wait until it finishes')
             if not 0 < run_number <= 999999:
                 raise ValueError('run number must be 1..999999')
             if (self.data / f'run{run_number:06d}.dat').exists():
@@ -148,7 +200,7 @@ class Sessions:
             info = {'pid': self.proc.pid, 'run_number': run_number, 'out': str(out), 'log': log.name,
                     'command': command, 'started': time.time(), 'ended': None, 'no_file': no_file}
             self.current.write_text(json.dumps(info))
-            threading.Thread(target=self._watch, args=(self.proc, log), daemon=True).start()
+            threading.Thread(target=self._watch, args=(self.proc, log, self.current), daemon=True).start()
             with open(self.base / 'sessions.jsonl', 'a') as f:
                 f.write(json.dumps({k: info[k] for k in ('run_number', 'out', 'started', 'command', 'no_file')}) + '\n')
 
@@ -241,14 +293,14 @@ class Sessions:
                 f.write(json.dumps({'time': time.time(), 'comment': text}) + '\n')
         return self.get_comment()
 
-    def _watch(self, proc, log):
+    def _watch(self, proc, log, path):
         proc.wait()
         log.close()
         with self.lock:
-            info = json.loads(self.current.read_text())
+            info = json.loads(path.read_text())
             if info.get('pid') == proc.pid:
                 info.update(ended=time.time(), returncode=proc.returncode)
-                self.current.write_text(json.dumps(info))
+                path.write_text(json.dumps(info))
 
 
 PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8">
@@ -299,6 +351,27 @@ def render(sessions, message=''):
         elif s.get('ended'):
             last = f'<div class="box bad">The last session (run {s.get("run_number")}) ended without a report; see {esc(s.get("log", ""))}.</div>'
         parts.append('<div class="box">No session is running.</div>' + last)
+        p = sessions.prepare_state()
+        if p.get('running'):
+            refresh = '<meta http-equiv="refresh" content="2">'
+            parts.append('<div class="box">Preparing the boards (initializing the HR-TDC boards that are not READY)…</div>')
+            return PAGE.format(refresh=refresh, body='\n'.join(parts))
+        if sessions.prepare_command():
+            done = ''
+            if p.get('report'):
+                r = p['report']
+                cls = 'ok' if r.get('result') == 'READY' else 'bad'
+                when = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(p.get('started', 0)))
+                done = (f'<br>Last prepare ({esc(when)}): <span class="{cls}">{esc(str(r.get("result")))}</span>'
+                        f'{"<br>" + esc(str(r.get("error"))) if r.get("error") else ""}'
+                        f'{"<br>Not READY: " + esc(", ".join(r["not_ready"])) if r.get("not_ready") else ""}'
+                        f'<br><span class="muted">{esc(p.get("out", ""))}</span>')
+            elif p.get('ended'):
+                done = f'<br><span class="bad">The last prepare ended without a report; see {esc(p.get("log", ""))}.</span>'
+            parts.append(f'''<form class="box" method="post" action="prepare">
+<button type="submit">Prepare boards</button>
+<span class="muted">Initializes the HR-TDC boards that are not READY (needed after a power cycle or when a session
+says "prepare required"). Boards that are READY are not touched.</span>{done}</form>''')
         parts.append(f'''<form class="box" method="post" action="start">
 <label>Run number <input type="number" name="run_number" min="1" max="999999" required value="{sessions.next_run_number()}"></label>
 <p><label><input type="checkbox" name="no_file" value="1"> Do not write data files (the online analyzer reads the data stream; no side-output filters)</label></p>
@@ -326,6 +399,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send(200, render(self.sessions))
         elif path == '/status.json':
             self.send(200, json.dumps(self.sessions.state()), 'application/json')
+        elif path == '/prepare.json':
+            self.send(200, json.dumps(self.sessions.prepare_state()), 'application/json')
         elif path == '/recording.json':
             self.send(200, json.dumps(self.sessions.recording()), 'application/json')
         elif path == '/run-settings.json':
@@ -337,7 +412,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = urllib.parse.urlsplit(self.path).path
-        if path not in ('/start', '/run-settings', '/run-comment'):
+        if path not in ('/start', '/prepare', '/run-settings', '/run-comment'):
             return self.send(404, 'not found', 'text/plain')
         # Only accept requests from these pages (same host), not from other sites.
         origin = self.headers.get('Origin') or self.headers.get('Referer') or ''
@@ -346,6 +421,12 @@ class Handler(BaseHTTPRequestHandler):
             if path in ('/run-settings', '/run-comment'):
                 return self.send(403, json.dumps({'error': 'the request did not come from this page'}), 'application/json')
             return self.send(403, render(self.sessions, 'Refused: the request did not come from this page.'))
+        if path == '/prepare':
+            try:
+                self.sessions.prepare()
+            except (ValueError, OSError) as exc:
+                return self.send(409, render(self.sessions, f'Not prepared: {exc}'))
+            return self.send(303, '', headers=[('Location', './')])
         length = int(self.headers.get('Content-Length') or 0)
         form = urllib.parse.parse_qs(self.rfile.read(min(length, 4096)).decode(), keep_blank_values=True)
         if path == '/run-comment':

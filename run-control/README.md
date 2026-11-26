@@ -48,6 +48,9 @@ run-control/daqctl.py run     --reader "$READER" --writer "$WRITER" --set-hbfsta
   one line of at most 255 bytes, used from the next RUN: the FileSink writes it into the header and trailer of the run file and
   the run hook records it in `hooks.jsonl`; changes are logged in `run-comments.jsonl`). Before starting it checks that no session or other board-touching process is running and that the
   run file does not exist. The command it runs is set in `config/local/session.env` (template: `config/session.env.example`).
+  When no session is running, the **Prepare boards** button runs `SESSION_PREPARE_COMMAND` (normally `daqctl.py prepare`) with
+  the same checks, in a new `<date>-prepare` directory, and shows its result and the boards that are not READY (also as
+  `prepare.json`). No session can start while it runs. Without `SESSION_PREPARE_COMMAND` the button is not shown.
 - The run number is given explicitly; the data file is `runXXXXXX.dat` (six digits) in the storage directory, and an existing file is never overwritten.
 - `<new-dir>` must not exist. `report.json` there records the result, every command, and every response.
 - Any unexpected response stops the action. Nothing is retried, reset, or repaired automatically.
