@@ -124,6 +124,22 @@ class FollowerTests(unittest.TestCase):
         f.poll(18)
         self.assertEqual(len(self.spawned), 1)
 
+    def test_next_run_after_an_exited_analyzer(self):
+        f = self.follower(with_param=False)
+        self.write_run(18)
+        f.poll(18)
+        self.spawned[0].returncode = 0
+        f.poll(18)
+        f.poll(18)
+        self.assertEqual(len(self.spawned), 1)  # the finished run is not started again
+        self.write_run(19)
+        f.poll(19)
+        self.assertEqual(len(self.spawned), 2)
+        self.assertIn(str(self.dir / 'run000019.dat'), self.spawned[1].command)
+        records = f.close()
+        self.assertEqual([r['run_number'] for r in records], [18, 19])
+        self.assertEqual(records[0]['stopped'], 'exited')
+
     def test_busy_port_is_recorded_not_fatal(self):
         self.port_ok = False
         f = self.follower()

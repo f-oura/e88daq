@@ -110,12 +110,15 @@ class RunFileFollower:
     def poll(self, run_number):
         """Call regularly with the current run number (None when unknown)."""
         cur = self.current
-        if cur is not None and cur['proc'].poll() is not None and cur['proc'].returncode == RESTART_STATUS:
+        # A finished analyzer is kept only as a marker of its run (_Done); it is not handled as an exit again, so a
+        # newer run file is still followed.
+        running = cur is not None and not isinstance(cur['proc'], _Done)
+        if running and cur['proc'].poll() is not None and cur['proc'].returncode == RESTART_STATUS:
             # Restart button of the analyzer page: the same run file again, with the same parameters.
             self._stop_current('restart requested from the page')
             self._start(cur['run'], cur['file'], cur['param'], note='restarted from the analyzer page')
             return
-        if cur is not None and cur['proc'].poll() is not None:
+        if running and cur['proc'].poll() is not None:
             # An analyzer that fails soon after starting with parameters is retried once without them, so the
             # DAQ health and channel histograms are still shown.
             quick = time.monotonic() - cur['start'] < self.param_fallback_seconds
