@@ -1,8 +1,9 @@
 """Tests of hul/trigger/trgctl.py.
 
-The check tests need nothing. The end-to-end tests need the programs built for the loopback address:
+The check tests need nothing. The end-to-end tests need the hul-trigger submodule and the programs
+built for the loopback address in a separate directory:
   HUL_TRIGGER_IP=127.0.0.1 hul/trigger/build-tools.sh <dir>
-  HUL_TRIGGER_TEST_TOOLS=<dir> python3 -m unittest tests.test_hul_trigger
+  HUL_TRIGGER_TEST_SOFTWARE=<dir> python3 -m unittest tests.test_hul_trigger
 They answer RBCP on 127.0.0.1:4660 with tests/fake_rbcp.py; no board is involved.
 """
 import importlib.util
@@ -76,18 +77,18 @@ class CheckTests(unittest.TestCase):
         self.assertIn('value is not a non-negative integer', '\n'.join(self.errors('RGN1::TOF_SEG1 x\n')))
 
 
-TOOLS = os.environ.get('HUL_TRIGGER_TEST_TOOLS')
+SOFTWARE = os.environ.get('HUL_TRIGGER_TEST_SOFTWARE')
 
 
-@unittest.skipUnless(TOOLS, 'set HUL_TRIGGER_TEST_TOOLS to programs built for 127.0.0.1')
+@unittest.skipUnless(SOFTWARE, 'set HUL_TRIGGER_TEST_SOFTWARE to programs built for 127.0.0.1')
 class EndToEndTests(unittest.TestCase):
     def setUp(self):
         from fake_rbcp import FakeRbcp
         self.board = FakeRbcp()
         self.tmp = tempfile.TemporaryDirectory()
         self.dir = pathlib.Path(self.tmp.name)
-        self.env = {**os.environ, 'HUL_TRIGGER_IP': '127.0.0.1', 'HUL_TRIGGER_TOOLS': TOOLS}
-        self.ref = pathlib.Path(TOOLS) / 'hul-trigger' / 'src' / 'software'
+        self.env = {**os.environ, 'HUL_TRIGGER_IP': '127.0.0.1', 'HUL_TRIGGER_SOFTWARE': SOFTWARE}
+        self.ref = trgctl.SOURCE / 'software'
 
     def tearDown(self):
         self.board.close()
@@ -147,6 +148,19 @@ class EndToEndTests(unittest.TestCase):
         p = self.trgctl('version', '--out', str(self.dir / 'x'), env={**self.env, 'HUL_TRIGGER_IP': '127.0.0.2'})
         self.assertNotEqual(p.returncode, 0)
         self.assertIn('rebuild', p.stderr)
+
+    def test_build_from_another_commit_is_refused(self):
+        import shutil
+        other = self.dir / 'software'
+        shutil.copytree(SOFTWARE, other, symlinks=True)
+        info = json.loads((other / 'build-info.json').read_text())
+        info['commit'] = '0' * 40
+        (other / 'build-info.json').write_text(json.dumps(info))
+        p = self.trgctl('write', 'nimio', str(PARAMS / 'nimio.txt'), '--out', str(self.dir / 'c'), '--yes',
+                        env={**self.env, 'HUL_TRIGGER_SOFTWARE': str(other)})
+        self.assertNotEqual(p.returncode, 0)
+        self.assertIn('the submodule is at', p.stderr)
+        self.assertEqual(self.board.writes, [])
 
     def test_no_answer_fails(self):
         self.board.close()

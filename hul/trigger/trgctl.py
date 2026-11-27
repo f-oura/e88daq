@@ -5,8 +5,10 @@
   version                    --out DIR    read the firmware version register (read only)
   write   register|nimio PARAM --out DIR  write a parameter file and verify every read-back value
 
-The programs come from hul/trigger/build-tools.sh (--tools or HUL_TRIGGER_TOOLS). The board address
-is compiled into them; HUL_TRIGGER_IP must match the address of the build, so a stale build is refused.
+The programs come from hul/trigger/build-tools.sh, in hul/trigger/software by default (--software or
+HUL_TRIGGER_SOFTWARE for another build). The board address is compiled into them; HUL_TRIGGER_IP must
+match the address of the build, so a stale build is refused. The upstream reference files are read from
+the hul-trigger submodule (hul/trigger/hul-trigger).
 
 check finds missing, unknown, duplicated, and out-of-range keys. The upstream programs read keys only
 when they need them and stop at the first missing one, after the registers before it have been written,
@@ -29,6 +31,8 @@ import sys
 import time
 from pathlib import Path
 
+HERE = Path(__file__).resolve().parent
+SOURCE = HERE / 'hul-trigger'
 KINDS = {
     # kind: (program, upstream reference file, read-back log written by the program)
     'register': ('Register', 'software/param/example.txt', 'last.log'),
@@ -99,10 +103,20 @@ def check(kind, param, reference):
     return values, errors
 
 
-def load_tools(tools):
-    if not tools:
-        raise SystemExit('#E: give --tools or set HUL_TRIGGER_TOOLS (the work directory of build-tools.sh)')
-    base = Path(tools) / 'hul-trigger'
+def reference_file(kind):
+    path = SOURCE / KINDS[kind][1]
+    if not path.is_file():
+        raise SystemExit(f'#E: {path} not found; run: git submodule update --init hul/trigger/hul-trigger')
+    return path
+
+
+def source_commit():
+    p = subprocess.run(['git', '-C', str(SOURCE), 'rev-parse', 'HEAD'], capture_output=True, text=True)
+    return p.stdout.strip() if p.returncode == 0 else None
+
+
+def load_build(software):
+    base = Path(software)
     info_file = base / 'build-info.json'
     if not info_file.is_file():
         raise SystemExit(f'#E: {info_file} not found; run hul/trigger/build-tools.sh first')
@@ -117,7 +131,7 @@ def verified_program(base, info, name):
         raise SystemExit('#E: HUL_TRIGGER_IP is not set (see config/hul-trigger.env.example)')
     if ip != info['board_ip']:
         raise SystemExit(f"#E: the programs were built for {info['board_ip']}, HUL_TRIGGER_IP is {ip}; rebuild")
-    program = base / 'build' / 'bin' / name
+    program = base / 'bin' / name
     if sha256(program) != info['binaries'].get(name):
         raise SystemExit(f'#E: {program} differs from the build record; rebuild')
     return program
@@ -173,8 +187,7 @@ def judge_write(run, log):
 
 
 def cmd_check(a):
-    base, _ = load_tools(a.tools)
-    _, errors = check(a.kind, a.param, base / 'src' / KINDS[a.kind][1])
+    _, errors = check(a.kind, a.param, reference_file(a.kind))
     for e in errors:
         print(f'#E: {e}')
     print(f"#{'E' if errors else 'D'}: {a.param}: {len(errors)} error(s)")
@@ -182,7 +195,7 @@ def cmd_check(a):
 
 
 def cmd_version(a):
-    base, info = load_tools(a.tools)
+    base, info = load_build(a.software)
     program = verified_program(base, info, 'Debug')
     out = new_out(a.out)
     run = run_program([program], out, a.timeout)
@@ -197,10 +210,13 @@ def cmd_version(a):
 
 
 def cmd_write(a):
-    base, info = load_tools(a.tools)
-    name, reference, log_name = KINDS[a.kind]
+    base, info = load_build(a.software)
+    name, _, log_name = KINDS[a.kind]
     program = verified_program(base, info, name)
-    values, errors = check(a.kind, a.param, base / 'src' / reference)
+    head = source_commit()
+    if info.get('commit') != head:
+        raise SystemExit(f"#E: the programs were built from {info.get('commit')}, the submodule is at {head}; rebuild")
+    values, errors = check(a.kind, a.param, reference_file(a.kind))
     if errors:
         for e in errors:
             print(f'#E: {e}')
@@ -232,7 +248,8 @@ def cmd_write(a):
 
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument('--tools', default=os.environ.get('HUL_TRIGGER_TOOLS'), help='work directory of build-tools.sh')
+    p.add_argument('--software', default=os.environ.get('HUL_TRIGGER_SOFTWARE', str(HERE / 'software')),
+                   help='output directory of build-tools.sh (default: hul/trigger/software)')
     p.add_argument('--timeout', type=float, default=120, help='seconds before the program is stopped')
     sub = p.add_subparsers(dest='action', required=True)
     c = sub.add_parser('check')

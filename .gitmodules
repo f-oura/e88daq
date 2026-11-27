@@ -1,3 +1,6 @@
 [submodule "online-analyzer"]
 	path = online-analyzer
 	url = https://github.com/jparc-saphire/NestdaqAnalyzer.git
+[submodule "hul/trigger/hul-trigger"]
+	path = hul/trigger/hul-trigger
+	url = https://github.com/jparc-saphire/hul-trigger.git
