@@ -47,7 +47,10 @@ Normally these are started by `run-control/daqctl.py`, not by hand.
     the file names keep the suffix of the session, and the summary of each run records the kind and N used.
   - `--webctl ADDR:PORT` starts `daq-webctl` (the NestDAQ web controller) at that address and leaves the state transitions,
     RUN, STOP, the run number, and END to the browser (`http://ADDR:PORT/daq-webctl.html`). The page is `webctl/daq-webctl.html` of this
-    directory (given with `--doc-root`; based on the NestDAQ page, MIT License in `webctl/LICENSE-nestdaq`): it colours the cell of the
+    directory (given with `--doc-root`; based on the NestDAQ page, MIT License in `webctl/LICENSE-nestdaq`): its state transition
+    buttons can be pressed only when every chosen device is in the state the transition starts from (none during a transition, or for
+    up to 5 s after a press until the states change; only RESET DEVICE and END PROCESS, with a confirmation, when the devices disagree,
+    one is in ERROR, or a transition has not moved for 30 s; none when the page has lost the controller), it colours the cell of the
     current state of each service, shows whether the session saves data (the newest run file and its size, or "NOT SAVING DATA" for a
     `--no-file` session), sets the side-output filter for the next RUN, and sets the run comment. The last three use the session page
     (`../run-control/session-server.py`) under the same proxy and show "unknown" when it cannot be reached. `scripts/webctl-hook.py` runs around

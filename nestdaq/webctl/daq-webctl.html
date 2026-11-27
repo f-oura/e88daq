@@ -2,7 +2,8 @@
 <!--
   E88 controller page, served by daq-webctl with doc-root nestdaq/webctl (see nestdaq/scripts/run-timeframe-chain.py).
   Based on share/controller/daq-webctl.html of NestDAQ eda7287 (MIT License, see LICENSE-nestdaq in this directory).
-  Added: colour on the current state of each service, whether the session saves data, and the settings of the
+  Added: state transition buttons that can be pressed only from the state the transition starts from,
+  colour on the current state of each service, whether the session saves data, and the settings of the
   side-output filter for the next RUN. The last two use the session page (session/*.json under the same proxy).
 -->
 <html lang="ja">
@@ -170,6 +171,12 @@
         td.st-error { background: #dc3545; color: #fff; }
         td.st-exit { background: #6c757d; color: #fff; }
 
+        /* State transition buttons: only the transitions possible from the current state can be pressed. */
+        button.btn-transition:disabled { opacity: 0.35; cursor: not-allowed; }
+        #transition-note { font-size: 12px; font-weight: 800; margin-bottom: 8px; padding: 4px 8px; border-radius: 3px; background: #eee; }
+        #transition-note.warn { background: #fff3cd; color: #6b4f00; }
+        #transition-note.error { background: #f8d7da; color: #721c24; }
+
         /* Whether data is saved */
         #recording { padding: 10px 14px; border-radius: 4px; font-size: 18px; font-weight: 900; margin-bottom: 8px; border: 2px solid; }
         #recording small { display: block; font-size: 12px; font-weight: 700; margin-top: 2px; }
@@ -270,15 +277,17 @@
                     <label class="label-normal"><input type="checkbox" id="wait-ready" onchange="redis_set_checkbox_status('wait-ready')" checked/> Wait Ready </label>
                 </div>
 
+                <div id="transition-note"></div>
+
                 <div class="command-box">
                     <h3>Forward: Idle &RightArrow; Running</h3>
                     <div class="flex-row">
                         <span class="arrow-separator">Idle &RightTriangle;</span>
-                        <button class="btn-cmd" onclick="redis_publish('CONNECT')">INIT DEVICE</button>
+                        <button class="btn-cmd btn-transition" data-command="CONNECT" onclick="PressTransition(this)">INIT DEVICE</button>
                         <span class="arrow-separator">&RightTriangle;</span>
-                        <button class="btn-cmd" onclick="redis_publish('INIT TASK')">INIT TASK</button>
+                        <button class="btn-cmd btn-transition" data-command="INIT TASK" onclick="PressTransition(this)">INIT TASK</button>
                         <span class="arrow-separator">&RightTriangle;</span>
-                        <button class="btn-cmd btn-run" onclick="redis_publish('RUN')">RUN</button>
+                        <button class="btn-cmd btn-run btn-transition" data-command="RUN" onclick="PressTransition(this)">RUN</button>
                         <span class="arrow-separator">&RightTriangle; Running</span>
                     </div>
                 </div>
@@ -287,17 +296,17 @@
                     <h3>Backward: Running &LeftArrow; Idle</h3>
                     <div class="flex-row">
                         <span class="arrow-separator">Idle &LeftTriangle;</span>
-                        <button class="btn-cmd btn-reset" onclick="redis_publish('RESET DEVICE')">RESET DEVICE</button>
+                        <button class="btn-cmd btn-reset btn-transition" data-command="RESET DEVICE" onclick="PressTransition(this)">RESET DEVICE</button>
                         <span class="arrow-separator">&LeftTriangle;</span>
-                        <button class="btn-cmd" onclick="redis_publish('RESET TASK')">RESET TASK</button>
+                        <button class="btn-cmd btn-transition" data-command="RESET TASK" onclick="PressTransition(this)">RESET TASK</button>
                         <span class="arrow-separator">&LeftTriangle;</span>
-                        <button class="btn-cmd btn-stop" onclick="redis_publish('STOP')">STOP</button>
+                        <button class="btn-cmd btn-stop btn-transition" data-command="STOP" onclick="PressTransition(this)">STOP</button>
                         <span class="arrow-separator">&LeftTriangle; Running</span>
                     </div>
                 </div>
 
                 <div class="flex-row" style="margin-top:15px; border-top:1px solid #ddd; padding-top:10px;">
-                    <button class="btn-cmd" onclick="redis_publish('END')">END PROCESS</button>
+                    <button class="btn-cmd btn-transition" data-command="END" onclick="PressTransition(this)">END PROCESS</button>
                 </div>
             </div>
 
@@ -359,6 +368,8 @@
            redis_set_checkbox_status('wait-ready');
            redis_get('run_number');
         }
+
+        socket.onclose = socket.onerror = function() { socketClosed = true; UpdateTransitionButtons(); };
 
         socket.onmessage = function(e) {
            const msg = e.data;
@@ -502,6 +513,7 @@
             const allInst = [];
             services.forEach(s => s.instances.forEach(i => allInst.push({name: s.service + ':' + i.instance})));
             UpdateTargetInstances({ instances: allInst, changed: arg.instance_list_changed });
+            UpdateTransitionButtons();
         }
 
         function UpdateTargetServices(arg) {
@@ -648,6 +660,86 @@
                 .catch(e => { msg.innerHTML = 'Not set: ' + EscapeHtml(e); });
             return false;
         }
+
+        // ---- State transition buttons ---------------------------------------------------------------------------
+        // A button can be pressed only when every targeted instance (the services and instances chosen on the right)
+        // is in the state the transition starts from. While a transition is under way, or for a moment after a
+        // press until the states change, nothing can be pressed (no double press). When the instances disagree, one
+        // is in ERROR, or the states have not changed for STUCK_MS during a transition, only RESET DEVICE and
+        // END PROCESS remain (with a confirmation), so there is always a way out. FairMQ ignores a command that is not possible from the current state; this only avoids mistakes.
+        const TRANSITION_FROM = {
+            'CONNECT': 'IDLE', 'INIT TASK': 'DEVICE READY', 'RUN': 'READY',
+            'STOP': 'RUNNING', 'RESET TASK': 'READY', 'RESET DEVICE': 'DEVICE READY', 'END': 'IDLE',
+        };
+        const ESCAPE_COMMANDS = ['RESET DEVICE', 'END'];
+        const STEADY_STATES = ['IDLE', 'DEVICE READY', 'READY', 'RUNNING'];
+        const PRESS_HOLD_MS = 5000, STUCK_MS = 30000;
+        let socketClosed = false, pressed = null;  // pressed: {until, key} after a button was pressed
+        let lastKey = '', keySince = Date.now();   // when the targeted states last changed
+
+        function SelectedTexts(id) {
+            return Array.from(document.getElementById(id).options).filter(o => o.selected && !o.disabled).map(o => o.text);
+        }
+
+        // States of the targeted instances: the chosen instances, else the chosen services, else all.
+        function TargetStates() {
+            const inst = SelectedTexts('instanceSelector'), srv = SelectedTexts('serviceSelector');
+            const states = [];
+            lastServices.forEach(s => s.instances.forEach(i => {
+                const key = s.service + ':' + i.instance;
+                const take = (inst.length && !inst.includes('all')) ? inst.includes(key)
+                           : (srv.length && !srv.includes('all')) ? srv.includes(s.service) : true;
+                if (take) states.push(String(i.state).toUpperCase());
+            }));
+            return states;
+        }
+
+        function TransitionMode() {
+            if (socketClosed) return { allowed: [], cls: 'error', text: 'Not connected to the controller: reload the page.' };
+            const states = TargetStates();
+            if (!states.length) return { allowed: [], cls: 'warn', text: 'No device is registered for the chosen services.' };
+            const key = states.join('|');
+            if (key !== lastKey) { lastKey = key; keySince = Date.now(); }
+            if (pressed && Date.now() < pressed.until && pressed.key === key)
+                return { allowed: [], cls: 'warn', text: 'Command sent; waiting for the devices to change state.' };
+            pressed = null;
+            const uniq = Array.from(new Set(states));
+            if (uniq.length === 1 && STEADY_STATES.includes(uniq[0])) {
+                const allowed = Object.keys(TRANSITION_FROM).filter(c => TRANSITION_FROM[c] === uniq[0]);
+                return { allowed, cls: '', escape: false, text: 'All ' + states.length + ' devices: ' + uniq[0] };
+            }
+            if (uniq.includes('ERROR') || uniq.length > 1 && uniq.every(s => STEADY_STATES.includes(s) || s === 'ERROR'))
+                return { allowed: ESCAPE_COMMANDS, cls: 'error', escape: true,
+                         text: 'Devices are not in one state (' + uniq.join(', ') + '): only RESET DEVICE and END PROCESS. ' +
+                               'Choose instances on the right to act on some of them.' };
+            if (Date.now() - keySince > STUCK_MS)
+                return { allowed: ESCAPE_COMMANDS, cls: 'error', escape: true,
+                         text: 'No state change for ' + Math.round((Date.now() - keySince) / 1000) + ' s (' + uniq.join(', ') +
+                               '): only RESET DEVICE and END PROCESS.' };
+            return { allowed: [], cls: 'warn', text: 'Transition under way (' + uniq.join(', ') + ').' };
+        }
+
+        function UpdateTransitionButtons() {
+            const mode = TransitionMode();
+            document.querySelectorAll('button.btn-transition').forEach(b => { b.disabled = !mode.allowed.includes(b.dataset.command); });
+            const note = document.getElementById('transition-note');
+            note.className = mode.cls; note.textContent = mode.text;
+            return mode;
+        }
+
+        function PressTransition(button) {
+            const mode = UpdateTransitionButtons();
+            const cmd = button.dataset.command;
+            if (!mode.allowed.includes(cmd)) return;
+            if (mode.escape && !confirm(button.textContent + ' for devices that are not in one state?')) return;
+            pressed = { until: Date.now() + PRESS_HOLD_MS, key: TargetStates().join('|') };
+            redis_publish(cmd);
+            UpdateTransitionButtons();
+        }
+
+        ['serviceSelector', 'instanceSelector'].forEach(id => document.getElementById(id).addEventListener('change', UpdateTransitionButtons));
+        setInterval(UpdateTransitionButtons, 1000);
+        UpdateTransitionButtons();
 
         PollRunComment(); setInterval(PollRunComment, 5000);
         PollRecording(); setInterval(PollRecording, 2000);
