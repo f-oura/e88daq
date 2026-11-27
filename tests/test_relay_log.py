@@ -1,6 +1,8 @@
 import importlib.util
 import io
 import pathlib
+import subprocess
+import sys
 import unittest
 
 spec = importlib.util.spec_from_file_location('chain', pathlib.Path(__file__).resolve().parents[1] / 'nestdaq' / 'scripts' / 'run-timeframe-chain.py')
@@ -82,6 +84,30 @@ class FloodLinesTests(unittest.TestCase):
         m.relay_log(stream, log, m.FLOOD_LINES, counts)
         self.assertEqual(counts['dropped'], 0)
         self.assertIn('number of source = 9', log.getvalue())
+
+
+class AnalyzerLimitTests(unittest.TestCase):
+    def run_child(self, gigabytes, allocate_gb):
+        code = f'b = bytearray(int({allocate_gb} * 2**30)); print("allocated")'
+        return subprocess.run([sys.executable, '-c', code], capture_output=True, text=True,
+                              preexec_fn=m.analyzer_limits(gigabytes))
+
+    def test_allocation_beyond_the_limit_fails_in_the_child_only(self):
+        r = self.run_child(2, 4)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn('MemoryError', r.stderr)
+
+    def test_allocation_inside_the_limit_works(self):
+        r = self.run_child(2, 0.25)
+        self.assertEqual(r.returncode, 0)
+        self.assertIn('allocated', r.stdout)
+
+    def test_zero_means_no_limit(self):
+        r = self.run_child(0, 0.25)
+        self.assertEqual(r.returncode, 0)
+
+    def test_default_is_set(self):
+        self.assertGreater(m.ANALYZER_MEMORY_GB, 0)
 
 
 if __name__ == '__main__':

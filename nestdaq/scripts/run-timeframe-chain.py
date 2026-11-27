@@ -28,10 +28,12 @@ run number at RUN) gets a new analyzer, and the last one keeps serving until the
 (one summary line per minute instead). Side-output filters are skipped (they write files).
 With --analyzer-http the online analyzer then reads the "dqm" side output of the TimeFrameBuilder directly
 (nda-online-monitor, best effort: the TimeFrameBuilder sends only when the analyzer can take a time frame).
+--analyzer-memory-gb G limits the address space of the online analyzer (default 64 GiB, 0: none; no core dump): when it is
+reached the analyzer alone stops instead of the kernel's out-of-memory killer choosing a victim on the host.
 The TimeFrameBuilder debug lines of incomplete time frames ('#D Output incomplete TF', '#D TFB Fail.') are counted and left out of
 TimeFrameBuilder.log in every run.
 """
-import argparse,json,math,os,re,shlex,signal,socket,subprocess,threading,time,sys
+import argparse,json,math,os,re,resource,shlex,signal,socket,subprocess,threading,time,sys
 from pathlib import Path
 import yaml
 ROOT=Path(__file__).resolve().parents[2]
@@ -52,6 +54,23 @@ DISCARD_LINE='Discarding data'  # TimeFrameBuilder --discard-output: one error l
 # Debug lines of the TimeFrameBuilder written for every incomplete time frame. With sources that lose heartbeat frames they
 # reach millions of lines (5 GB in 8 hours), so they are counted and left out of TimeFrameBuilder.log like DISCARD_LINE.
 FLOOD_LINES=('#D Output incomplete TF','#D TFB Fail.')
+ANALYZER_MEMORY_GB=64  # address-space limit of the online analyzer; 0 = none
+
+
+def analyzer_limits(gigabytes):
+    """preexec_fn for the online analyzer: lower priority, an address-space limit and no core dump.
+
+    The analyzer may fall behind or fail, the DAQ must not. When it reaches the limit only the analyzer stops (its
+    allocation fails); without a limit the kernel's out-of-memory killer chooses a victim on the whole host
+    (a 350 GB analyzer was killed that way). No core file: a core of that size would fill the disk.
+    """
+    def apply():
+        os.nice(10)
+        if gigabytes>0:
+            limit=int(gigabytes*2**30)
+            resource.setrlimit(resource.RLIMIT_AS,(limit,limit))
+            resource.setrlimit(resource.RLIMIT_CORE,(0,0))
+    return apply
 
 
 def relay_log(stream, log, drop, counts, period=60, clock=time.monotonic):
@@ -135,6 +154,7 @@ def main():
     p.add_argument('--analyzer-http',metavar='ADDR:PORT',help='run the online analyzer on the run file and serve its histograms here (for example 127.0.0.1:18090); uses --e88-param when given')
     p.add_argument('--analyzer-exe',type=Path,default=ROOT/'build/online-analyzer/bin/nda-replay',help='online analyzer executable (nda-replay)')
     p.add_argument('--monitor-exe',type=Path,default=ROOT/'build/online-analyzer/bin/nda-online-monitor',help='online analyzer device for --no-file (nda-online-monitor)')
+    p.add_argument('--analyzer-memory-gb',type=float,default=ANALYZER_MEMORY_GB,help='address-space limit of the online analyzer in GiB (0: none); when it is reached only the analyzer stops')
     p.add_argument('--no-file',action='store_true',help='write no run file (no FileSink); with --analyzer-http the analyzer reads the dqm side output')
     a=p.parse_args()
     if not a.prefix or a.seconds<=0 or not math.isfinite(a.seconds) or a.output.exists():p.error('prefix required, seconds positive, output must be new')
@@ -180,12 +200,12 @@ def main():
     procs={};logs={};hbf_attempted=False;hbf_off_attempted=False;report={'mode':('replay' if a.replay else 'live')+('+webctl' if a.webctl else ''),'hardware_control':'Root HBF gate' if a.set_hbfstate else 'none','setup_manifest':str(a.manifest),'hbf_events':[],'run_number':a.run_number,'data_file':None if a.no_file else str(data_file),'no_file':a.no_file,'sources':{},'states':{},'commands':{}}
     if skipped_filter:report['side_filter_skipped']=f'{skipped_filter}: not run with --no-file'
     relays={}
-    def launch(key,command,drop=None):
+    def launch(key,command,drop=None,preexec=None):
         logs[key]=open(a.output/f'{key}.log','w')
         if drop is None:
-            procs[key]=subprocess.Popen([str(x) for x in command],stdout=logs[key],stderr=subprocess.STDOUT,env=env,cwd=ROOT)
+            procs[key]=subprocess.Popen([str(x) for x in command],stdout=logs[key],stderr=subprocess.STDOUT,env=env,cwd=ROOT,preexec_fn=preexec)
         else:
-            procs[key]=subprocess.Popen([str(x) for x in command],stdout=subprocess.PIPE,stderr=subprocess.STDOUT,env=env,cwd=ROOT)
+            procs[key]=subprocess.Popen([str(x) for x in command],stdout=subprocess.PIPE,stderr=subprocess.STDOUT,env=env,cwd=ROOT,preexec_fn=preexec)
             counts={'pattern':drop,'dropped':0}
             report.setdefault('log_lines_left_out',{})[key]=counts
             relays[key]=threading.Thread(target=relay_log,args=(procs[key].stdout,logs[key],drop,counts),daemon=True)
@@ -228,7 +248,7 @@ def main():
         def spawn(command,log_path):
             log=open(log_path,'a');analyzer_logs.append(log)
             # Lower priority than the DAQ processes; the analyzer may fall behind, the DAQ must not.
-            return subprocess.Popen(command,stdout=log,stderr=subprocess.STDOUT,env=env,cwd=ROOT,preexec_fn=lambda:os.nice(10))
+            return subprocess.Popen(command,stdout=log,stderr=subprocess.STDOUT,env=env,cwd=ROOT,preexec_fn=analyzer_limits(a.analyzer_memory_gb))
         follower=RunFileFollower(data_file.parent,started,
             lambda f,use_param:analyzer_command(a.analyzer_exe.resolve(),f,a.analyzer_http,param if use_param else None,fems),
             spawn,lambda:port_free(a.analyzer_http),a.output,with_param=param is not None)
@@ -291,7 +311,7 @@ def main():
         if monitor:
             margs=['--in-chan-name','in','--http',f'http:{a.analyzer_http}','--monitor-run-number',str(a.run_number),'--expect-fem',','.join(str(setup['data_sources'][role]['endpoint']) for role in roles.values())]
             if a.e88_param:margs+=['--e88-param',a.e88_param.resolve()]
-            launch('OnlineMonitor',command('OnlineMonitor',a.monitor_exe.resolve(),margs))
+            launch('OnlineMonitor',command('OnlineMonitor',a.monitor_exe.resolve(),margs),preexec=analyzer_limits(a.analyzer_memory_gb))
         for group in ['TimeFrameBuilder',f'TimeFrameBuilder-{tag}']:r('HSET','parameters:'+group,'metrics-uri',f'tcp://127.0.0.1:{port}/0',db=2)
         launch('TimeFrameBuilder',command('TimeFrameBuilder',a.prefix/'bin/TimeFrameBuilder',['--in-chan-name','in','--out-chan-name','out','--buffer-timeout','2000','--buffer-depth-limit','10000','--output-incomplete-tf','true','--discard-output','true' if a.no_file else 'false']),drop=(DISCARD_LINE,*FLOOD_LINES) if a.no_file else FLOOD_LINES)
         for index,(svc,role) in enumerate(roles.items()):

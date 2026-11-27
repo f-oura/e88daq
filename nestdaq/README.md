@@ -69,6 +69,10 @@ Normally these are started by `run-control/daqctl.py`, not by hand.
     cannot slow the DAQ down. A new run file (a new run number at RUN) gets a new analyzer; the last one keeps serving until the
     next run or the end of the session. If it fails with the E88 parameters (`--e88-param`), it is restarted once without them.
     A failing analyzer or a port in use is recorded in `online_analyzer` of `report.json` and never stops the run.
+    The analyzer is started with an address-space limit of 64 GiB (`--analyzer-memory-gb`, 0 for none) and without core dumps, so that
+    an analyzer whose memory keeps growing stops by itself instead of being chosen by the kernel's out-of-memory killer on the
+    whole host (a live analyzer once reached 350 GB in five hours of damaged data). This applies to `nda-replay` and to the
+    `--no-file` analyzer below.
     The page refreshes the displayed histograms every few seconds (Monitoring) and has two buttons at the top: Reset clears the
     histograms and counters, which then fill again from the next time frame, and Restart starts the analyzer again on the same run
     file from its beginning (the page is unavailable for a few seconds; recorded in `online_analyzer` of `report.json`).
