@@ -99,6 +99,13 @@ cmake --build build/online-analyzer -j
 E88PARAM_DIR=<e88param> ctest --test-dir build/online-analyzer
 ```
 
+The analyzer of a session is the pinned build above; move the pin only between sessions. To try another analyzer version
+while a session runs, build it in a clone of your own (branch `dev` or a branch from it) and run it with
+`tools/analyzer-dev.py` of that clone: it only reads the run file, so it does not touch the DAQ or the analyzer of the
+session, and it can compare its results with those of the pinned build (see `online-analyzer/README.md`, "Developing next to
+a running DAQ"). The page of the session's analyzer has a Reset for one browser only, next to the Reset that clears the
+histograms for everybody.
+
 ## Devices
 
 - `devices/StfPartSender` — sends saved STF multipart messages (one message per line, hex parts) for replay tests.
