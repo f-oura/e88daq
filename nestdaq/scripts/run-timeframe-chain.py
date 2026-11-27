@@ -28,6 +28,8 @@ run number at RUN) gets a new analyzer, and the last one keeps serving until the
 (one summary line per minute instead). Side-output filters are skipped (they write files).
 With --analyzer-http the online analyzer then reads the "dqm" side output of the TimeFrameBuilder directly
 (nda-online-monitor, best effort: the TimeFrameBuilder sends only when the analyzer can take a time frame).
+The TimeFrameBuilder debug lines of incomplete time frames ('#D Output incomplete TF', '#D TFB Fail.') are counted and left out of
+TimeFrameBuilder.log in every run.
 """
 import argparse,json,math,os,re,shlex,signal,socket,subprocess,threading,time,sys
 from pathlib import Path
@@ -47,30 +49,34 @@ def service_base(name):
 
 
 DISCARD_LINE='Discarding data'  # TimeFrameBuilder --discard-output: one error line per time frame it could not send
+# Debug lines of the TimeFrameBuilder written for every incomplete time frame. With sources that lose heartbeat frames they
+# reach millions of lines (5 GB in 8 hours), so they are counted and left out of TimeFrameBuilder.log like DISCARD_LINE.
+FLOOD_LINES=('#D Output incomplete TF','#D TFB Fail.')
 
 
 def relay_log(stream, log, drop, counts, period=60, clock=time.monotonic):
-    """Copy a device's output to its log, leaving out the lines that contain `drop`.
+    """Copy a device's output to its log, leaving out the lines that contain `drop` (a string or a tuple of strings).
 
     The dropped lines are counted (counts['dropped']) and summarised once per `period` seconds. The pipe is read
     until EOF whatever happens to the log, so the device can never block on a full pipe.
     """
     last=clock();since=0
+    drops=(drop,) if isinstance(drop,str) else tuple(drop);label=' | '.join(drops)
     for raw in iter(stream.readline,b''):
         try:
             line=raw.decode(errors='replace')
-            if drop in line:
+            if any(d in line for d in drops):
                 counts['dropped']+=1;since+=1
             else:
                 log.write(line)
             if since and clock()-last>=period:
-                log.write(f"[launcher] {since} lines with '{drop}' left out in the last {clock()-last:.0f} s (total {counts['dropped']})\n")
+                log.write(f"[launcher] {since} lines with '{label}' left out in the last {clock()-last:.0f} s (total {counts['dropped']})\n")
                 last=clock();since=0
             log.flush()
         except Exception as exc:  # a full disk or a closed log must not stop the reading
             counts['errors']=counts.get('errors',0)+1;counts['last_error']=str(exc)
     try:
-        if since:log.write(f"[launcher] {since} lines with '{drop}' left out (total {counts['dropped']})\n")
+        if since:log.write(f"[launcher] {since} lines with '{label}' left out (total {counts['dropped']})\n")
         log.flush()
     except Exception as exc:
         counts['last_error']=str(exc)
@@ -287,7 +293,7 @@ def main():
             if a.e88_param:margs+=['--e88-param',a.e88_param.resolve()]
             launch('OnlineMonitor',command('OnlineMonitor',a.monitor_exe.resolve(),margs))
         for group in ['TimeFrameBuilder',f'TimeFrameBuilder-{tag}']:r('HSET','parameters:'+group,'metrics-uri',f'tcp://127.0.0.1:{port}/0',db=2)
-        launch('TimeFrameBuilder',command('TimeFrameBuilder',a.prefix/'bin/TimeFrameBuilder',['--in-chan-name','in','--out-chan-name','out','--buffer-timeout','2000','--buffer-depth-limit','10000','--output-incomplete-tf','true','--discard-output','true' if a.no_file else 'false']),drop=DISCARD_LINE if a.no_file else None)
+        launch('TimeFrameBuilder',command('TimeFrameBuilder',a.prefix/'bin/TimeFrameBuilder',['--in-chan-name','in','--out-chan-name','out','--buffer-timeout','2000','--buffer-depth-limit','10000','--output-incomplete-tf','true','--discard-output','true' if a.no_file else 'false']),drop=(DISCARD_LINE,*FLOOD_LINES) if a.no_file else FLOOD_LINES)
         for index,(svc,role) in enumerate(roles.items()):
             b=setup['data_sources'][role];report['sources'][svc]={'endpoint':b['endpoint'],'serial':b['serial'],'tdc_type':b['tdc_type_label']}
             if a.replay:

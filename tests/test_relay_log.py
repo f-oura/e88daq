@@ -64,5 +64,25 @@ class RelayTests(unittest.TestCase):
         self.assertGreaterEqual(counts['errors'], 2)
 
 
+class FloodLinesTests(unittest.TestCase):
+    def test_several_patterns_are_left_out(self):
+        flood = ['[DEBUG] #D Output incomplete TF: 12\n', '[DEBUG] #D TFB Fail. TFid: 3(0x3), 1: 0/2, FEid: 5\n']
+        stream = io.BytesIO((''.join(flood * 3) + '[INFO] number of source = 9\n' + m.DISCARD_LINE + '\n').encode())
+        log, counts = io.StringIO(), {'dropped': 0}
+        m.relay_log(stream, log, (m.DISCARD_LINE, *m.FLOOD_LINES), counts)
+        self.assertEqual(counts['dropped'], 7)
+        text = log.getvalue()
+        body = [line for line in text.splitlines() if not line.startswith('[launcher]')]
+        self.assertEqual(body, ['[INFO] number of source = 9'])  # no dropped line is kept
+        self.assertIn('[launcher] 7 lines with', text)  # the summary line stays
+
+    def test_other_debug_lines_stay(self):
+        stream = io.BytesIO(b'[DEBUG] #D DB Server URI: tcp://127.0.0.1:1/0\n[DEBUG]  number of source = 9\n')
+        log, counts = io.StringIO(), {'dropped': 0}
+        m.relay_log(stream, log, m.FLOOD_LINES, counts)
+        self.assertEqual(counts['dropped'], 0)
+        self.assertIn('number of source = 9', log.getvalue())
+
+
 if __name__ == '__main__':
     unittest.main()

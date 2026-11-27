@@ -72,6 +72,9 @@ Normally these are started by `run-control/daqctl.py`, not by hand.
     The page refreshes the displayed histograms every few seconds (Monitoring) and has two buttons at the top: Reset clears the
     histograms and counters, which then fill again from the next time frame, and Restart starts the analyzer again on the same run
     file from its beginning (the page is unavailable for a few seconds; recorded in `online_analyzer` of `report.json`).
+  - In every run the launcher also leaves the TimeFrameBuilder's debug lines for incomplete time frames (`#D Output incomplete TF`,
+    `#D TFB Fail.`) out of `TimeFrameBuilder.log`: it counts them and writes one summary line per minute. Sources that lose heartbeat
+    frames made these lines 5 GB in eight hours; the number of incomplete time frames stays in the online analyzer.
   - `--no-file` starts no FileSink, so no run file is written; the TimeFrameBuilder runs with `--discard-output true` and
     discards the time frames. Its error line for every discarded time frame (about 0.1 kB, some 0.7 GB per hour) is left out of
     `TimeFrameBuilder.log`: the launcher counts these lines, writes one summary line per minute, and records the total in
