@@ -240,6 +240,8 @@
                     <strong>Comment:</strong>
                     <input type="text" id="run-comment" maxlength="255" placeholder="written into the run file at the next RUN"/>
                     <input type="submit" id="run-comment-set" value="SET"/>
+                    <input type="button" id="run-comment-latest" value="LATEST" onclick="UseLatestComment()"
+                           title="Fill in the comment set most recently (in this or an earlier session); then press SET"/>
                     <span id="comment-message"></span>
                 </form>
                 <div id="comment-current">Comment for the next RUN: </div>
@@ -266,6 +268,8 @@
                     </select>
                     <label class="label-normal">1 of N: <input type="number" id="filter-prescale" min="1" max="1000000000" step="1"/></label>
                     <input type="submit" id="filter-apply" value="APPLY"/>
+                    <input type="button" id="filter-latest" value="APPLY LATEST" onclick="ApplyLatestFilter()"
+                           title="Apply the settings applied most recently (in this or an earlier session)"/>
                     <span id="filter-message"></span>
                 </form>
             </div>
@@ -588,18 +592,34 @@
                 .then(j => { recording = j; UpdateRecording(); });
         }
 
+        const FILTER_NAMES = {sc: 'SC coincidence + prescale', prescale: 'prescale only', off: 'off'};
+        let latestFilter = null, latestComment = null;
+
+        function FilterText(kind, prescale) { return (FILTER_NAMES[kind] || kind) + (kind === 'off' ? '' : ', 1 of ' + prescale); }
+        function TimeText(t) { return new Date(t * 1000).toLocaleString(); }
+
         function ShowFilterSettings(j) {
             const kindSel = document.getElementById('filter-kind'), preIn = document.getElementById('filter-prescale');
-            const apply = document.getElementById('filter-apply');
+            const apply = document.getElementById('filter-apply'), latestBtn = document.getElementById('filter-latest');
             const usable = !!(j && j.available && !j.error);
             [kindSel, preIn, apply].forEach(e => { e.disabled = !usable; });
+            latestFilter = usable && j.latest && j.latest.kind ? j.latest : null;
+            latestBtn.disabled = !latestFilter;
             if (!j) { document.getElementById('filter-current').innerHTML = 'Not available: the session page cannot be reached from here.'; return; }
             if (!j.available) { document.getElementById('filter-current').innerHTML = 'Not available: ' + (j.reason || 'no side-output filter in this session') + '.'; return; }
             document.getElementById('filter-current').innerHTML = j.error ? 'Current: ' + j.error :
-                'Current (used at the next RUN): <b>' + ({sc: 'SC coincidence + prescale', prescale: 'prescale only', off: 'off'}[j.kind] || j.kind) +
-                '</b>' + (j.kind === 'off' ? '' : ', 1 of ' + j.prescale);
+                'Current (used at the next RUN): <b>' + EscapeHtml(FilterText(j.kind, j.prescale)) + '</b>' +
+                (latestFilter ? ' &nbsp; Latest applied: ' + EscapeHtml(FilterText(latestFilter.kind, latestFilter.prescale)) +
+                                ' (' + TimeText(latestFilter.time) + ')' : ' &nbsp; Latest applied: none');
             const kind = document.getElementById('filter-kind'), pre = document.getElementById('filter-prescale');
             if (document.activeElement !== kind && document.activeElement !== pre && !filterEdited) { kind.value = j.kind; pre.value = j.prescale; }
+        }
+
+        function ApplyLatestFilter() {
+            if (!latestFilter) return;
+            document.getElementById('filter-kind').value = latestFilter.kind;
+            document.getElementById('filter-prescale').value = latestFilter.prescale;
+            ApplyFilterSettings();
         }
 
         let filterEdited = false;
@@ -637,11 +657,24 @@
             const input = document.getElementById('run-comment'), set = document.getElementById('run-comment-set');
             const usable = !!(j && j.available);
             input.disabled = set.disabled = !usable;
+            latestComment = usable && j.latest && typeof j.latest.comment === 'string' ? j.latest : null;
+            document.getElementById('run-comment-latest').disabled = !latestComment;
             const cur = document.getElementById('comment-current');
             if (!j) { cur.innerHTML = 'Comment: the session page cannot be reached from here.'; return; }
             if (!usable) { cur.innerHTML = 'Comment: not available (' + EscapeHtml(j.reason || '') + ').'; return; }
-            cur.innerHTML = 'Comment for the next RUN: ' + (j.comment ? '<b>' + EscapeHtml(j.comment) + '</b>' : '<i>(none)</i>');
+            cur.innerHTML = 'Comment for the next RUN: ' + (j.comment ? '<b>' + EscapeHtml(j.comment) + '</b>' : '<i>(none)</i>') +
+                (latestComment ? ' &nbsp; Latest set: ' + (latestComment.comment ? EscapeHtml(latestComment.comment) : '<i>(empty)</i>') +
+                                 ' (' + TimeText(latestComment.time) + ')' : '');
             if (document.activeElement !== input && !commentEdited) input.value = j.comment;
+        }
+
+        function UseLatestComment() {
+            if (!latestComment) return;
+            const input = document.getElementById('run-comment');
+            input.value = latestComment.comment;
+            commentEdited = true;
+            document.getElementById('comment-message').innerHTML = 'Latest comment filled in: press SET to use it.';
+            input.focus();
         }
 
         function PollRunComment() {

@@ -158,7 +158,7 @@ class ControllerApiTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             s, out = self.session(d)
             try:
-                self.assertEqual(s.get_settings(), {'available': True, 'kind': 'sc', 'prescale': 100})
+                self.assertEqual(s.get_settings(), {'available': True, 'kind': 'sc', 'prescale': 100, 'latest': None})
                 self.assertEqual(s.set_settings('prescale', 10)['kind'], 'prescale')
                 self.assertEqual((out / 'timeframe' / 'run-settings.txt').read_text(), 'kind prescale\nprescale 10\n')
                 with self.assertRaises(ValueError):
@@ -181,6 +181,33 @@ class ControllerApiTests(unittest.TestCase):
                 s.proc.kill(); s.proc.wait()
 
 
+class LatestTests(unittest.TestCase):
+    def test_latest_entry(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.assertIsNone(m.latest_entry(d, 'run-comments.jsonl'))
+            for name, rows in (('a', [{'time': 1, 'comment': 'one'}, {'time': 5, 'comment': 'five'}]),
+                               ('b', [{'time': 3, 'comment': 'three'}]), ('c', [])):
+                pathlib.Path(d, name).mkdir()
+                pathlib.Path(d, name, 'run-comments.jsonl').write_text(''.join(json.dumps(r) + '\n' for r in rows))
+            self.assertEqual(m.latest_entry(d, 'run-comments.jsonl')['comment'], 'five')
+            with open(pathlib.Path(d, 'b', 'run-comments.jsonl'), 'a') as f:
+                f.write(json.dumps({'time': 9, 'comment': ''}) + '\n' + 'not json\n')  # a broken last line is skipped
+            self.assertEqual(m.latest_entry(d, 'run-comments.jsonl'), {'time': 9, 'comment': ''})
+
+    def test_latest_settings_from_an_earlier_session(self):
+        with tempfile.TemporaryDirectory() as d:
+            old = pathlib.Path(d, 'out', '20260101-000000-run000001')
+            old.mkdir(parents=True)
+            (old / 'run-settings.jsonl').write_text(json.dumps({'time': 1, 'kind': 'prescale', 'prescale': 7}) + '\n')
+            s, out = ControllerApiTests.session(None, d)
+            try:
+                self.assertEqual(s.get_settings()['latest'], {'time': 1, 'kind': 'prescale', 'prescale': 7})
+                s.set_settings('sc', 50)
+                self.assertEqual({k: v for k, v in s.get_settings()['latest'].items() if k != 'time'}, {'kind': 'sc', 'prescale': 50})
+            finally:
+                s.proc.kill(); s.proc.wait()
+
+
 class RunCommentTests(unittest.TestCase):
     def test_clean(self):
         self.assertEqual(m.clean_comment('  SC HV 1500 V\r\nthreshold 30 mV\t '), 'SC HV 1500 V threshold 30 mV')
@@ -196,8 +223,9 @@ class RunCommentTests(unittest.TestCase):
             s, out = ControllerApiTests.session(None, d, with_settings=False)
             try:
                 (out / 'timeframe' / 'redis.conf').write_text(f'bind 127.0.0.1\nport {r.port}\n')
-                self.assertEqual(s.get_comment(), {'available': True, 'comment': ''})
+                self.assertEqual(s.get_comment(), {'available': True, 'comment': '', 'latest': None})
                 self.assertEqual(s.set_comment('beam on, SC HV 1500 V')['comment'], 'beam on, SC HV 1500 V')
+                self.assertEqual(s.get_comment()['latest']['comment'], 'beam on, SC HV 1500 V')
                 self.assertEqual(r.data[b'run_info:run_comment'], b'beam on, SC HV 1500 V')
                 with self.assertRaises(ValueError):
                     s.set_comment('x' * 256)

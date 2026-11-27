@@ -17,9 +17,11 @@ Configuration (a bash file, see config/session.env.example):
 
 For the controller page of the running session (nestdaq/webctl/daq-webctl.html, served under the same proxy):
   GET  recording.json         whether the session writes run files, and the newest runNNNNNN.dat it wrote (name, size)
-  GET  run-settings.json      settings of the side-output filter for the next RUN
+  GET  run-settings.json      settings of the side-output filter for the next RUN, and the latest settings set from the
+                              page in any session ("latest", from run-settings.jsonl of the session directories)
   POST run-settings           kind (sc, prescale, off) and prescale (N) for the next RUN
-  GET  run-comment.json       the run comment (run_info:run_comment in the session Redis)
+  GET  run-comment.json       the run comment (run_info:run_comment in the session Redis), and the latest comment set
+                              from the page in any session ("latest", from run-comments.jsonl)
   POST run-comment            set the run comment; the FileSink writes it into the header and trailer of the run file
                               at the next RUN, and the run hook records it in hooks.jsonl
 """
@@ -45,6 +47,25 @@ import run_settings  # noqa: E402
 
 COMMENT_KEY = 'run_info:run_comment'
 COMMENT_BYTES = 255  # the FileSink keeps 255 bytes (header and trailer field of 256 bytes)
+
+
+def latest_entry(base, name):
+    """Newest record (by its time) of the files <base>/*/<name> (one JSON object per line), or None."""
+    best = None
+    for path in Path(base).glob('*/' + name):
+        try:
+            lines = path.read_text().splitlines()
+        except OSError:
+            continue
+        for line in reversed(lines):
+            try:
+                entry = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(entry, dict) and (best is None or entry.get('time', 0) > best.get('time', 0)):
+                best = entry
+            break
+    return best
 
 
 def clean_comment(text):
@@ -246,10 +267,12 @@ class Sessions:
             else:
                 reason = 'this session runs no side-output filter (it starts with --sc-filter-prescale or --prescale-filter)'
             return {'available': False, 'reason': reason}
+        latest = latest_entry(self.base, 'run-settings.jsonl')
+        latest = {k: latest[k] for k in ('time', 'kind', 'prescale') if k in latest} if latest else None
         try:
-            return {'available': True, **run_settings.read(path)}
+            return {'available': True, **run_settings.read(path), 'latest': latest}
         except (OSError, ValueError) as exc:
-            return {'available': True, 'error': str(exc)}
+            return {'available': True, 'error': str(exc), 'latest': latest}
 
     def set_settings(self, kind, prescale):
         with self.lock:
@@ -278,7 +301,9 @@ class Sessions:
             value = redis_lite.command(port, 'GET', COMMENT_KEY)
         except (OSError, redis_lite.RedisError) as exc:
             return {'available': False, 'reason': f'session Redis not reachable: {exc}'}
-        return {'available': True, 'comment': value.decode(errors='replace') if value is not None else ''}
+        latest = latest_entry(self.base, 'run-comments.jsonl')
+        latest = {k: latest[k] for k in ('time', 'comment') if k in latest} if latest else None
+        return {'available': True, 'comment': value.decode(errors='replace') if value is not None else '', 'latest': latest}
 
     def set_comment(self, text):
         text = clean_comment(text)

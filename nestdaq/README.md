@@ -52,7 +52,9 @@ Normally these are started by `run-control/daqctl.py`, not by hand.
     up to 5 s after a press until the states change; only RESET DEVICE and END PROCESS, with a confirmation, when the devices disagree,
     one is in ERROR, or a transition has not moved for 30 s; none when the page has lost the controller), it colours the cell of the
     current state of each service, shows whether the session saves data (the newest run file and its size, or "NOT SAVING DATA" for a
-    `--no-file` session), sets the side-output filter for the next RUN, and sets the run comment. The last three use the session page
+    `--no-file` session), sets the side-output filter for the next RUN, and sets the run comment. APPLY LATEST applies the filter
+    settings applied most recently from the page and LATEST fills in the comment set most recently (press SET to use it), also from
+    an earlier session. The last three use the session page
     (`../run-control/session-server.py`) under the same proxy and show "unknown" when it cannot be reached. `scripts/webctl-hook.py` runs around
     RUN and STOP: after RUN it waits until every sampler has connected and then switches the root HBF on; before STOP it switches it off.
     The session ends when every device has exited (END) or on Ctrl-C/SIGTERM, and the HBF is switched off then as well.
