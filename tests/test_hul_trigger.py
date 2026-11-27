@@ -115,7 +115,7 @@ class EndToEndTests(unittest.TestCase):
         self.assertTrue((self.dir / 'w' / 'last.log').exists())
 
     def test_write_e88_files(self):
-        for kind, name in [('register', 'scor.txt'), ('register', 'scor-clock10k.txt'), ('register', 'clock1k.txt'), ('nimio', 'nimio.txt'), ('nimio', 'nimio-clock10k.txt')]:
+        for kind, name in [('register', 'scor.txt'), ('register', 'scor-clock10k.txt'), ('register', 'clock1k.txt'), ('register', 'clock.txt'), ('nimio', 'nimio.txt'), ('nimio', 'nimio-clock10k.txt'), ('nimio', 'nimio-clock.txt')]:
             with self.subTest(name=name):
                 p = self.trgctl('write', kind, str(PARAMS / name), '--out', str(self.dir / name), '--yes')
                 self.assertEqual(p.returncode, 0, p.stdout + p.stderr)

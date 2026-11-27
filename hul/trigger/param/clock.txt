@@ -1,0 +1,453 @@
+###############################################################################
+#                                                                             #
+#  Region1 : TOF Segment Selection                                            #
+#                                                                             #
+###############################################################################
+RGN1::TOF_SEG1			1      ________________________________________
+RGN1::TOF_SEG2			1      |                                      |
+RGN1::TOF_SEG3			1      |                                      |
+RGN1::TOF_SEG4			1      |                                      |
+RGN1::TOF_SEG5			1      |        Please Write   0 or 1         |
+RGN1::TOF_SEG6			1      |                                      |
+RGN1::TOF_SEG7			1      |          0: Off,  1: On              |
+RGN1::TOF_SEG8			1      |                                      |
+RGN1::TOF_SEG9			1      |                                      |
+RGN1::TOF_SEG10			1      |                                      |
+RGN1::TOF_SEG11			1      |                                      |
+RGN1::TOF_SEG12			1      |                                      |
+RGN1::TOF_SEG13			1      |                                      |
+RGN1::TOF_SEG14			1      |                                      |
+RGN1::TOF_SEG15			1      |                                      |
+RGN1::TOF_SEG16			1      |                                      |
+RGN1::TOF_SEG17			1      |                                      |
+RGN1::TOF_SEG18			1      |                                      |
+RGN1::TOF_SEG19			1      |                                      |
+RGN1::TOF_SEG20			1      |                                      |
+RGN1::TOF_SEG21			1      |                                      |
+RGN1::TOF_SEG22			1      |                                      |
+RGN1::TOF_SEG23			1      |                                      |
+RGN1::TOF_SEG24			1      |______________________________________|
+
+###############################################################################
+#                                                                             #
+#  Region2A : Beam/Scat                                                       #
+#                                                                             #
+###############################################################################
+### BEAM ###
+RGN2A::DELAY_BH1_BEAM		1	#  1-255
+RGN2A::DELAY_BH2_BEAM		1	#  1-255
+RGN2A::DELAY_BAC_BEAM		1	#  1-255
+RGN2A::DELAY_HTOF_BEAM		1	#  1-255
+RGN2A::DELAY_OTHER1_BEAM	1	#  1-255
+RGN2A::DELAY_OTHER2_BEAM	1	#  1-255
+
+RGN2A::WIDTH_BH1_BEAM		10	#  0-127
+RGN2A::WIDTH_BH2_BEAM		1	#  0-127
+RGN2A::WIDTH_BAC_BEAM		10	#  0-127
+RGN2A::WIDTH_HTOF_BEAM		10	#  0-127
+RGN2A::WIDTH_OTHER1_BEAM	10	#  0-127
+RGN2A::WIDTH_OTHER2_BEAM	10	#  0-127
+
+RGN2A::COIN_BH1			2	#  0: Veto,  1: On,  2: Off
+RGN2A::COIN_BH2			1	#  0: Veto,  1: On,  2: Off
+RGN2A::COIN_BAC			2	#  0: Veto,  1: On,  2: Off
+RGN2A::COIN_HTOF		2	#  0: Veto,  1: On,  2: Off
+RGN2A::COIN_OTHER1		2	#  0: Veto,  1: On,  2: Off
+RGN2A::COIN_OTHER2		2	#  0: Veto,  1: On,  2: Off
+
+### SCAT ###
+RGN2A::DELAY_BEAM_SCAT		1	#  1-255
+RGN2A::DELAY_PVAC_SCAT		1	#  1-255
+RGN2A::DELAY_FAC_SCAT		1	#  1-255
+RGN2A::DELAY_TOF_SCAT		1	#  1-255
+RGN2A::DELAY_LAC_SCAT		1	#  1-255
+RGN2A::DELAY_WC_SCAT		1	#  1-255
+RGN2A::DELAY_M2D1_SCAT		1	#  1-255
+RGN2A::DELAY_M2D2_SCAT		1	#  1-255
+RGN2A::DELAY_M3D_SCAT		1	#  1-255
+RGN2A::DELAY_OTHER3_SCAT	1	#  1-255
+RGN2A::DELAY_OTHER4_SCAT	1	#  1-255
+
+RGN2A::WIDTH_BEAM_SCAT		1	#  0-127
+RGN2A::WIDTH_PVAC_SCAT		10	#  0-127
+RGN2A::WIDTH_FAC_SCAT		10	#  0-127
+RGN2A::WIDTH_TOF_SCAT		10	#  0-127
+RGN2A::WIDTH_LAC_SCAT		10	#  0-127
+RGN2A::WIDTH_WC_SCAT		10	#  0-127
+RGN2A::WIDTH_M2D1_SCAT		10	#  0-127
+RGN2A::WIDTH_M2D2_SCAT		10	#  0-127
+RGN2A::WIDTH_M3D_SCAT		10	#  0-127
+RGN2A::WIDTH_OTHER3_SCAT	10	#  0-127
+RGN2A::WIDTH_OTHER4_SCAT	10	#  0-127
+
+RGN2A::COIN_BEAM		1	#  0: Veto,  1: On,  2: Off
+RGN2A::COIN_PVAC		2	#  0: Veto,  1: On,  2: Off
+RGN2A::COIN_FAC			2	#  0: Veto,  1: On,  2: Off
+RGN2A::COIN_TOF			2	#  0: Veto,  1: On,  2: Off
+RGN2A::COIN_LAC			2	#  0: Veto,  1: On,  2: Off
+RGN2A::COIN_WC			2	#  0: Veto,  1: On,  2: Off
+RGN2A::COIN_M2D1		2	#  0: Veto,  1: On,  2: Off
+RGN2A::COIN_M2D2		2	#  0: Veto,  1: On,  2: Off
+RGN2A::COIN_M3D			2	#  0: Veto,  1: On,  2: Off
+RGN2A::COIN_OTHER3		2	#  0: Veto,  1: On,  2: Off
+RGN2A::COIN_OTHER4		2	#  0: Veto,  1: On,  2: Off
+
+###############################################################################
+#                                                                             #
+#  Region2B : Beam/Scat                                                       #
+#                                                                             #
+###############################################################################
+### BEAM ###
+RGN2B::DELAY_BH1_BEAM		1	#  1-255
+RGN2B::DELAY_BH2_BEAM		1	#  1-255
+RGN2B::DELAY_BAC_BEAM		1	#  1-255
+RGN2B::DELAY_HTOF_BEAM		1	#  1-255
+RGN2B::DELAY_OTHER1_BEAM	1	#  1-255
+RGN2B::DELAY_OTHER2_BEAM	1	#  1-255
+
+RGN2B::WIDTH_BH1_BEAM		10	#  0-127
+RGN2B::WIDTH_BH2_BEAM		10	#  0-127
+RGN2B::WIDTH_BAC_BEAM		10	#  0-127
+RGN2B::WIDTH_HTOF_BEAM		10	#  0-127
+RGN2B::WIDTH_OTHER1_BEAM	10	#  0-127
+RGN2B::WIDTH_OTHER2_BEAM	10	#  0-127
+
+RGN2B::COIN_BH1			2	#  0: Veto,  1: On,  2: Off
+RGN2B::COIN_BH2			2	#  0: Veto,  1: On,  2: Off
+RGN2B::COIN_BAC			2	#  0: Veto,  1: On,  2: Off
+RGN2B::COIN_HTOF		2	#  0: Veto,  1: On,  2: Off
+RGN2B::COIN_OTHER1		2	#  0: Veto,  1: On,  2: Off
+RGN2B::COIN_OTHER2		2	#  0: Veto,  1: On,  2: Off
+
+### SCAT ###
+RGN2B::DELAY_BEAM_SCAT		1	#  1-255
+RGN2B::DELAY_PVAC_SCAT		1	#  1-255
+RGN2B::DELAY_FAC_SCAT		1	#  1-255
+RGN2B::DELAY_TOF_SCAT		1	#  1-255
+RGN2B::DELAY_LAC_SCAT		1	#  1-255
+RGN2B::DELAY_WC_SCAT		1	#  1-255
+RGN2B::DELAY_M2D1_SCAT		1	#  1-255
+RGN2B::DELAY_M2D2_SCAT		1	#  1-255
+RGN2B::DELAY_M3D_SCAT		1	#  1-255
+RGN2B::DELAY_OTHER3_SCAT	1	#  1-255
+RGN2B::DELAY_OTHER4_SCAT	1	#  1-255
+
+RGN2B::WIDTH_BEAM_SCAT		10	#  0-127
+RGN2B::WIDTH_PVAC_SCAT		10	#  0-127
+RGN2B::WIDTH_FAC_SCAT		10	#  0-127
+RGN2B::WIDTH_TOF_SCAT		10	#  0-127
+RGN2B::WIDTH_LAC_SCAT		10	#  0-127
+RGN2B::WIDTH_WC_SCAT		10	#  0-127
+RGN2B::WIDTH_M2D1_SCAT		10	#  0-127
+RGN2B::WIDTH_M2D2_SCAT		10	#  0-127
+RGN2B::WIDTH_M3D_SCAT		10	#  0-127
+RGN2B::WIDTH_OTHER3_SCAT	10	#  0-127
+RGN2B::WIDTH_OTHER4_SCAT	10	#  0-127
+
+RGN2B::COIN_BEAM		2	#  0: Veto,  1: On,  2: Off
+RGN2B::COIN_PVAC		2	#  0: Veto,  1: On,  2: Off
+RGN2B::COIN_FAC			2	#  0: Veto,  1: On,  2: Off
+RGN2B::COIN_TOF			2	#  0: Veto,  1: On,  2: Off
+RGN2B::COIN_LAC			2	#  0: Veto,  1: On,  2: Off
+RGN2B::COIN_WC			2	#  0: Veto,  1: On,  2: Off
+RGN2B::COIN_M2D1		2	#  0: Veto,  1: On,  2: Off
+RGN2B::COIN_M2D2		2	#  0: Veto,  1: On,  2: Off
+RGN2B::COIN_M3D			2	#  0: Veto,  1: On,  2: Off
+RGN2B::COIN_OTHER3		2	#  0: Veto,  1: On,  2: Off
+RGN2B::COIN_OTHER4		2	#  0: Veto,  1: On,  2: Off
+
+###############################################################################
+#                                                                             #
+#  Region2C : Beam/Scat                                                       #
+#                                                                             #
+###############################################################################
+### BEAM ###
+RGN2C::DELAY_BH1_BEAM		1	#  1-255
+RGN2C::DELAY_BH2_BEAM		1	#  1-255
+RGN2C::DELAY_BAC_BEAM		1	#  1-255
+RGN2C::DELAY_HTOF_BEAM		1	#  1-255
+RGN2C::DELAY_OTHER1_BEAM	1	#  1-255
+RGN2C::DELAY_OTHER2_BEAM	1	#  1-255
+
+RGN2C::WIDTH_BH1_BEAM		10	#  0-127
+RGN2C::WIDTH_BH2_BEAM		10	#  0-127
+RGN2C::WIDTH_BAC_BEAM		10	#  0-127
+RGN2C::WIDTH_HTOF_BEAM		10	#  0-127
+RGN2C::WIDTH_OTHER1_BEAM	10	#  0-127
+RGN2C::WIDTH_OTHER2_BEAM	10	#  0-127
+
+RGN2C::COIN_BH1			2	#  0: Veto,  1: On,  2: Off
+RGN2C::COIN_BH2			2	#  0: Veto,  1: On,  2: Off
+RGN2C::COIN_BAC			2	#  0: Veto,  1: On,  2: Off
+RGN2C::COIN_HTOF		2	#  0: Veto,  1: On,  2: Off
+RGN2C::COIN_OTHER1		2	#  0: Veto,  1: On,  2: Off
+RGN2C::COIN_OTHER2		2	#  0: Veto,  1: On,  2: Off
+
+### SCAT ###
+RGN2C::DELAY_BEAM_SCAT		1	#  1-255
+RGN2C::DELAY_PVAC_SCAT		1	#  1-255
+RGN2C::DELAY_FAC_SCAT		1	#  1-255
+RGN2C::DELAY_TOF_SCAT		1	#  1-255
+RGN2C::DELAY_LAC_SCAT		1	#  1-255
+RGN2C::DELAY_WC_SCAT		1	#  1-255
+RGN2C::DELAY_M2D1_SCAT		1	#  1-255
+RGN2C::DELAY_M2D2_SCAT		1	#  1-255
+RGN2C::DELAY_M3D_SCAT		1	#  1-255
+RGN2C::DELAY_OTHER3_SCAT	1	#  1-255
+RGN2C::DELAY_OTHER4_SCAT	1	#  1-255
+
+RGN2C::WIDTH_BEAM_SCAT		10	#  0-127
+RGN2C::WIDTH_PVAC_SCAT		10	#  0-127
+RGN2C::WIDTH_FAC_SCAT		10	#  0-127
+RGN2C::WIDTH_TOF_SCAT		10	#  0-127
+RGN2C::WIDTH_LAC_SCAT		10	#  0-127
+RGN2C::WIDTH_WC_SCAT		10	#  0-127
+RGN2C::WIDTH_M2D1_SCAT		10	#  0-127
+RGN2C::WIDTH_M2D2_SCAT		10	#  0-127
+RGN2C::WIDTH_M3D_SCAT		10	#  0-127
+RGN2C::WIDTH_OTHER3_SCAT	10	#  0-127
+RGN2C::WIDTH_OTHER4_SCAT	10	#  0-127
+
+RGN2C::COIN_BEAM		2	#  0: Veto,  1: On,  2: Off
+RGN2C::COIN_PVAC		2	#  0: Veto,  1: On,  2: Off
+RGN2C::COIN_FAC			2	#  0: Veto,  1: On,  2: Off
+RGN2C::COIN_TOF			2	#  0: Veto,  1: On,  2: Off
+RGN2C::COIN_LAC			2	#  0: Veto,  1: On,  2: Off
+RGN2C::COIN_WC			2	#  0: Veto,  1: On,  2: Off
+RGN2C::COIN_M2D1		2	#  0: Veto,  1: On,  2: Off
+RGN2C::COIN_M2D2		2	#  0: Veto,  1: On,  2: Off
+RGN2C::COIN_M3D			2	#  0: Veto,  1: On,  2: Off
+RGN2C::COIN_OTHER3		2	#  0: Veto,  1: On,  2: Off
+RGN2C::COIN_OTHER4		2	#  0: Veto,  1: On,  2: Off
+
+###############################################################################
+#                                                                             #
+#  Region2D : Beam/Scat                                                       #
+#                                                                             #
+###############################################################################
+### BEAM ###
+RGN2D::DELAY_BH1_BEAM		1	#  1-255
+RGN2D::DELAY_BH2_BEAM		1	#  1-255
+RGN2D::DELAY_BAC_BEAM		1	#  1-255
+RGN2D::DELAY_HTOF_BEAM		1	#  1-255
+RGN2D::DELAY_OTHER1_BEAM	1	#  1-255
+RGN2D::DELAY_OTHER2_BEAM	1	#  1-255
+
+RGN2D::WIDTH_BH1_BEAM		10	#  0-127
+RGN2D::WIDTH_BH2_BEAM		10	#  0-127
+RGN2D::WIDTH_BAC_BEAM		10	#  0-127
+RGN2D::WIDTH_HTOF_BEAM		10	#  0-127
+RGN2D::WIDTH_OTHER1_BEAM	10	#  0-127
+RGN2D::WIDTH_OTHER2_BEAM	10	#  0-127
+
+RGN2D::COIN_BH1			2	#  0: Veto,  1: On,  2: Off
+RGN2D::COIN_BH2			2	#  0: Veto,  1: On,  2: Off
+RGN2D::COIN_BAC			2	#  0: Veto,  1: On,  2: Off
+RGN2D::COIN_HTOF		2	#  0: Veto,  1: On,  2: Off
+RGN2D::COIN_OTHER1		2	#  0: Veto,  1: On,  2: Off
+RGN2D::COIN_OTHER2		2	#  0: Veto,  1: On,  2: Off
+
+### SCAT ###
+RGN2D::DELAY_BEAM_SCAT		1	#  1-255
+RGN2D::DELAY_PVAC_SCAT		1	#  1-255
+RGN2D::DELAY_FAC_SCAT		1	#  1-255
+RGN2D::DELAY_TOF_SCAT		1	#  1-255
+RGN2D::DELAY_LAC_SCAT		1	#  1-255
+RGN2D::DELAY_WC_SCAT		1	#  1-255
+RGN2D::DELAY_M2D1_SCAT		1	#  1-255
+RGN2D::DELAY_M2D2_SCAT		1	#  1-255
+RGN2D::DELAY_M3D_SCAT		1	#  1-255
+RGN2D::DELAY_OTHER3_SCAT	1	#  1-255
+RGN2D::DELAY_OTHER4_SCAT	1	#  1-255
+
+RGN2D::WIDTH_BEAM_SCAT		10	#  0-127
+RGN2D::WIDTH_PVAC_SCAT		10	#  0-127
+RGN2D::WIDTH_FAC_SCAT		10	#  0-127
+RGN2D::WIDTH_TOF_SCAT		10	#  0-127
+RGN2D::WIDTH_LAC_SCAT		10	#  0-127
+RGN2D::WIDTH_WC_SCAT		10	#  0-127
+RGN2D::WIDTH_M2D1_SCAT		10	#  0-127
+RGN2D::WIDTH_M2D2_SCAT		10	#  0-127
+RGN2D::WIDTH_M3D_SCAT		10	#  0-127
+RGN2D::WIDTH_OTHER3_SCAT	10	#  0-127
+RGN2D::WIDTH_OTHER4_SCAT	10	#  0-127
+
+RGN2D::COIN_BEAM		2	#  0: Veto,  1: On,  2: Off
+RGN2D::COIN_PVAC		2	#  0: Veto,  1: On,  2: Off
+RGN2D::COIN_FAC			2	#  0: Veto,  1: On,  2: Off
+RGN2D::COIN_TOF			2	#  0: Veto,  1: On,  2: Off
+RGN2D::COIN_LAC			2	#  0: Veto,  1: On,  2: Off
+RGN2D::COIN_WC			2	#  0: Veto,  1: On,  2: Off
+RGN2D::COIN_M2D1		2	#  0: Veto,  1: On,  2: Off
+RGN2D::COIN_M2D2		2	#  0: Veto,  1: On,  2: Off
+RGN2D::COIN_M3D			2	#  0: Veto,  1: On,  2: Off
+RGN2D::COIN_OTHER3		2	#  0: Veto,  1: On,  2: Off
+RGN2D::COIN_OTHER4		2	#  0: Veto,  1: On,  2: Off
+
+###############################################################################
+#                                                                             #
+#  Region2E : Beam/Scat                                                       #
+#                                                                             #
+###############################################################################
+### BEAM ###
+RGN2E::DELAY_BH1_BEAM		1	#  1-255
+RGN2E::DELAY_BH2_BEAM		1	#  1-255
+RGN2E::DELAY_BAC_BEAM		1	#  1-255
+RGN2E::DELAY_HTOF_BEAM		1	#  1-255
+RGN2E::DELAY_OTHER1_BEAM	1	#  1-255
+RGN2E::DELAY_OTHER2_BEAM	1	#  1-255
+
+RGN2E::WIDTH_BH1_BEAM		10	#  0-127
+RGN2E::WIDTH_BH2_BEAM		10	#  0-127
+RGN2E::WIDTH_BAC_BEAM		10	#  0-127
+RGN2E::WIDTH_HTOF_BEAM		10	#  0-127
+RGN2E::WIDTH_OTHER1_BEAM	10	#  0-127
+RGN2E::WIDTH_OTHER2_BEAM	10	#  0-127
+
+RGN2E::COIN_BH1			2	#  0: Veto,  1: On,  2: Off
+RGN2E::COIN_BH2			2	#  0: Veto,  1: On,  2: Off
+RGN2E::COIN_BAC			2	#  0: Veto,  1: On,  2: Off
+RGN2E::COIN_HTOF		2	#  0: Veto,  1: On,  2: Off
+RGN2E::COIN_OTHER1		2	#  0: Veto,  1: On,  2: Off
+RGN2E::COIN_OTHER2		2	#  0: Veto,  1: On,  2: Off
+
+### SCAT ###
+RGN2E::DELAY_BEAM_SCAT		1	#  1-255
+RGN2E::DELAY_PVAC_SCAT		1	#  1-255
+RGN2E::DELAY_FAC_SCAT		1	#  1-255
+RGN2E::DELAY_TOF_SCAT		1	#  1-255
+RGN2E::DELAY_LAC_SCAT		1	#  1-255
+RGN2E::DELAY_WC_SCAT		1	#  1-255
+RGN2E::DELAY_M2D1_SCAT		1	#  1-255
+RGN2E::DELAY_M2D2_SCAT		1	#  1-255
+RGN2E::DELAY_M3D_SCAT		1	#  1-255
+RGN2E::DELAY_OTHER3_SCAT	1	#  1-255
+RGN2E::DELAY_OTHER4_SCAT	1	#  1-255
+
+RGN2E::WIDTH_BEAM_SCAT		10	#  0-127
+RGN2E::WIDTH_PVAC_SCAT		10	#  0-127
+RGN2E::WIDTH_FAC_SCAT		10	#  0-127
+RGN2E::WIDTH_TOF_SCAT		10	#  0-127
+RGN2E::WIDTH_LAC_SCAT		10	#  0-127
+RGN2E::WIDTH_WC_SCAT		10	#  0-127
+RGN2E::WIDTH_M2D1_SCAT		10	#  0-127
+RGN2E::WIDTH_M2D2_SCAT		10	#  0-127
+RGN2E::WIDTH_M3D_SCAT		10	#  0-127
+RGN2E::WIDTH_OTHER3_SCAT	10	#  0-127
+RGN2E::WIDTH_OTHER4_SCAT	10	#  0-127
+
+RGN2E::COIN_BEAM		2	#  0: Veto,  1: On,  2: Off
+RGN2E::COIN_PVAC		2	#  0: Veto,  1: On,  2: Off
+RGN2E::COIN_FAC			2	#  0: Veto,  1: On,  2: Off
+RGN2E::COIN_TOF			2	#  0: Veto,  1: On,  2: Off
+RGN2E::COIN_LAC			2	#  0: Veto,  1: On,  2: Off
+RGN2E::COIN_WC			2	#  0: Veto,  1: On,  2: Off
+RGN2E::COIN_M2D1		2	#  0: Veto,  1: On,  2: Off
+RGN2E::COIN_M2D2		2	#  0: Veto,  1: On,  2: Off
+RGN2E::COIN_M3D			2	#  0: Veto,  1: On,  2: Off
+RGN2E::COIN_OTHER3		2	#  0: Veto,  1: On,  2: Off
+RGN2E::COIN_OTHER4		2	#  0: Veto,  1: On,  2: Off
+
+###############################################################################
+#                                                                             #
+#  Region2F : Beam/Scat                                                       #
+#                                                                             #
+###############################################################################
+### BEAM ###
+RGN2F::DELAY_BH1_BEAM		1	#  1-255
+RGN2F::DELAY_BH2_BEAM		1	#  1-255
+RGN2F::DELAY_BAC_BEAM		1	#  1-255
+RGN2F::DELAY_HTOF_BEAM		1	#  1-255
+RGN2F::DELAY_OTHER1_BEAM	1	#  1-255
+RGN2F::DELAY_OTHER2_BEAM	1	#  1-255
+
+RGN2F::WIDTH_BH1_BEAM		10	#  0-127
+RGN2F::WIDTH_BH2_BEAM		10	#  0-127
+RGN2F::WIDTH_BAC_BEAM		10	#  0-127
+RGN2F::WIDTH_HTOF_BEAM		10	#  0-127
+RGN2F::WIDTH_OTHER1_BEAM	10	#  0-127
+RGN2F::WIDTH_OTHER2_BEAM	10	#  0-127
+
+RGN2F::COIN_BH1			2	#  0: Veto,  1: On,  2: Off
+RGN2F::COIN_BH2			2	#  0: Veto,  1: On,  2: Off
+RGN2F::COIN_BAC			2	#  0: Veto,  1: On,  2: Off
+RGN2F::COIN_HTOF		2	#  0: Veto,  1: On,  2: Off
+RGN2F::COIN_OTHER1		2	#  0: Veto,  1: On,  2: Off
+RGN2F::COIN_OTHER2		2	#  0: Veto,  1: On,  2: Off
+
+### SCAT ###
+RGN2F::DELAY_BEAM_SCAT		1	#  1-255
+RGN2F::DELAY_PVAC_SCAT		1	#  1-255
+RGN2F::DELAY_FAC_SCAT		1	#  1-255
+RGN2F::DELAY_TOF_SCAT		1	#  1-255
+RGN2F::DELAY_LAC_SCAT		1	#  1-255
+RGN2F::DELAY_WC_SCAT		1	#  1-255
+RGN2F::DELAY_M2D1_SCAT		1	#  1-255
+RGN2F::DELAY_M2D2_SCAT		1	#  1-255
+RGN2F::DELAY_M3D_SCAT		1	#  1-255
+RGN2F::DELAY_OTHER3_SCAT	1	#  1-255
+RGN2F::DELAY_OTHER4_SCAT	1	#  1-255
+
+RGN2F::WIDTH_BEAM_SCAT		10	#  0-127
+RGN2F::WIDTH_PVAC_SCAT		10	#  0-127
+RGN2F::WIDTH_FAC_SCAT		10	#  0-127
+RGN2F::WIDTH_TOF_SCAT		10	#  0-127
+RGN2F::WIDTH_LAC_SCAT		10	#  0-127
+RGN2F::WIDTH_WC_SCAT		10	#  0-127
+RGN2F::WIDTH_M2D1_SCAT		10	#  0-127
+RGN2F::WIDTH_M2D2_SCAT		10	#  0-127
+RGN2F::WIDTH_M3D_SCAT		10	#  0-127
+RGN2F::WIDTH_OTHER3_SCAT	10	#  0-127
+RGN2F::WIDTH_OTHER4_SCAT	10	#  0-127
+
+RGN2F::COIN_BEAM		2	#  0: Veto,  1: On,  2: Off
+RGN2F::COIN_PVAC		2	#  0: Veto,  1: On,  2: Off
+RGN2F::COIN_FAC			2	#  0: Veto,  1: On,  2: Off
+RGN2F::COIN_TOF			2	#  0: Veto,  1: On,  2: Off
+RGN2F::COIN_LAC			2	#  0: Veto,  1: On,  2: Off
+RGN2F::COIN_WC			2	#  0: Veto,  1: On,  2: Off
+RGN2F::COIN_M2D1		2	#  0: Veto,  1: On,  2: Off
+RGN2F::COIN_M2D2		2	#  0: Veto,  1: On,  2: Off
+RGN2F::COIN_M3D			2	#  0: Veto,  1: On,  2: Off
+RGN2F::COIN_OTHER3		2	#  0: Veto,  1: On,  2: Off
+RGN2F::COIN_OTHER4		2	#  0: Veto,  1: On,  2: Off
+
+###############################################################################
+#                                                                             #
+#  Region3 : Trigger OR Prescaler                                             #
+#                                                                             #
+###############################################################################
+RGN3::PS_R2A		1	#  0-16777215
+RGN3::PS_R2B		1	#  0-16777215
+RGN3::PS_R2C		1	#  0-16777215
+RGN3::PS_R2D		1	#  0-16777215
+RGN3::PS_R2E		1	#  0-16777215
+RGN3::PS_R2F		1	#  0-16777215
+
+RGN3::GATE_R2A		0	#  0: Off,  1: Spill On,  2: Spill Off,  3: OR
+RGN3::GATE_R2B		0	#  0: Off,  1: Spill On,  2: Spill Off,  3: OR
+RGN3::GATE_R2C		0	#  0: Off,  1: Spill On,  2: Spill Off,  3: OR
+RGN3::GATE_R2D		0	#  0: Off,  1: Spill On,  2: Spill Off,  3: OR
+RGN3::GATE_R2E		0	#  0: Off,  1: Spill On,  2: Spill Off,  3: OR
+RGN3::GATE_R2F		0	#  0: Off,  1: Spill On,  2: Spill Off,  3: OR
+
+RGN3::SEL_R2A		1	#  0: Off,  1: On
+RGN3::SEL_R2B		1	#  0: Off,  1: On
+RGN3::SEL_R2C		1	#  0: Off,  1: On
+RGN3::SEL_R2D		1	#  0: Off,  1: On
+RGN3::SEL_R2E		1	#  0: Off,  1: On
+RGN3::SEL_R2F		1	#  0: Off,  1: On
+
+###############################################################################
+#                                                                             #
+#  Region4 : Clock/Reserve2                                                   #
+#                                                                             #
+###############################################################################
+RGN4::SEL_EXTCLK	0	#  0: Off,  1: On
+RGN4::SEL_RSV2		0	#  0: Off,  1: On
+RGN4::SEL_CLK10M	0	#  0: Off,  1: On
+RGN4::SEL_CLK1M		0	#  0: Off,  1: On
+RGN4::SEL_CLK100k	0	#  0: Off,  1: On
+RGN4::SEL_CLK10k	0	#  0: Off,  1: On
+RGN4::SEL_CLK1k		1	#  0: Off,  1: On
+RGN4::GATE		1	#  0: Off,  1: Spill On,  2: Spill Off,  3: OR
