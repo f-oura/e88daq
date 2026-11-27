@@ -21,3 +21,7 @@ __pycache__/
 
 # HUL trigger programs built by hul/trigger/build-tools.sh (the board address is compiled in)
 /hul/trigger/software/
+# Read-back logs of the HUL trigger programs run by hand, and editor autosave files
+/hul/trigger/last.log
+/hul/trigger/nimio.log
+\#*\#

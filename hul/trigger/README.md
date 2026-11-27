@@ -10,7 +10,7 @@ at a pinned commit. The FPGA firmware is not kept here.
 | `software/` | the programs built by `build-tools.sh` (`bin/Register`, `bin/NimIO`, `bin/Debug`, `bin/ReconfigFPGA`) and `build-info.json`; ignored by Git, since the board address is compiled in |
 | `build-tools.sh` | builds the programs from the submodule with the board address from the host configuration |
 | `trgctl.py` | checks a parameter file, writes it, verifies every read-back value, reads the firmware version |
-| `param/` | parameter files: `scor.txt`, `scor-clock10k.txt` (`scor.txt` plus the 10 kHz clock on Clock PS, gate always open), `clock1k.txt` (register settings), `nimio.txt`, `nimio-clock10k.txt` (NIM outputs; the second puts the 10 kHz clock on NIM OUT 1 and 2) |
+| `param/` | parameter files: `scor.txt`, `scor-clock10k.txt` (`scor.txt` plus the 10 kHz clock on Clock PS, gate always open), `clock1k.txt`, `clock.txt` (`clock1k.txt` with every trigger gate of Region 3 off) (register settings), `nimio.txt`, `nimio-clock10k.txt` (the 10 kHz clock on NIM OUT 1 and 2), `nimio-clock.txt` (1 kHz on NIM OUT 1, 10 kHz on NIM OUT 2 and 4, TRIG_PSOR_A on NIM OUT 3) (NIM outputs) |
 
 ## Build
 
@@ -50,7 +50,8 @@ hul/trigger/trgctl.py write nimio hul/trigger/param/nimio.txt --out <new-dir>
   record, or (for `write`) the build was made from another commit than the submodule's.
 - `--software <dir>` (or `HUL_TRIGGER_SOFTWARE`) uses a build in another directory.
 - The programs in `software/bin/` can also be run by hand, as in the upstream instructions, but then nothing is checked
-  or recorded. Run them in a scratch directory: they write their read-back log (`last.log`, `nimio.log`) to the current directory.
+  or recorded. Run them in a scratch directory: they write their read-back log (`last.log`, `nimio.log`) to the current directory
+  (Git ignores these two names under `hul/trigger/`).
 - Nothing is retried. `ReconfigFPGA` is built but not wrapped.
 
 ## Tests
